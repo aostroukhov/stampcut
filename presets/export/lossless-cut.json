@@ -1,0 +1,9 @@
+{
+  "id": "lossless-cut",
+  "name": "Только обрезка, без перекодирования",
+  "description": "Режим Machete: потоки копируются как есть, занимает секунды. Оверлей недоступен, точность обрезки — до ближайшего ключевого кадра.",
+  "container": "mp4",
+  "streamCopy": true,
+  "fastStart": true,
+  "outputSuffix": "_cut"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "telegram-vertical-9x16",
+  "name": "Вертикаль 9:16 (1080×1920)",
+  "description": "Для вертикальных постов, Reels и Shorts. Горизонтальный исходник вписывается в кадр с размытым фоном.",
+  "container": "mp4",
+  "video": {
+    "codec": "h264",
+    "width": 1080,
+    "height": 1920,
+    "fit": "pad-blur",
+    "maxFps": 30,
+    "crf": 21,
+    "preset": "veryfast",
+    "profile": "high",
+    "level": "4.1",
+    "pixelFormat": "yuv420p",
+    "hdrToSdr": true,
+    "hardwareEncoder": "auto"
+  },
+  "audio": {
+    "codec": "aac",
+    "bitrateKbps": 128,
+    "sampleRate": 48000,
+    "loudnessNormalize": false
+  },
+  "fastStart": true,
+  "outputSuffix": "_9x16"
+}

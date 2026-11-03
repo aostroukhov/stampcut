@@ -1,0 +1,12 @@
+{
+  "id": "logo-bottom-right",
+  "name": "Логотип справа внизу",
+  "file": "logo-white.png",
+  "anchor": "bottom-right",
+  "offset": { "x": 3, "y": 3, "unit": "percent" },
+  "size": { "width": 25, "unit": "percentOfVideoWidth" },
+  "opacity": 0.8,
+  "timeRange": null,
+  "fadeInSec": 0,
+  "fadeOutSec": 0
+}

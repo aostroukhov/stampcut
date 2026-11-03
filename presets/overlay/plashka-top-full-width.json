@@ -1,0 +1,12 @@
+{
+  "id": "plashka-top-full-width",
+  "name": "Плашка сверху на всю ширину, первые 5 секунд",
+  "file": "plashka-news.png",
+  "anchor": "top-center",
+  "offset": { "x": 0, "y": 0, "unit": "percent" },
+  "size": { "width": 100, "unit": "percentOfVideoWidth" },
+  "opacity": 1.0,
+  "timeRange": { "fromSec": 0, "toSec": 5 },
+  "fadeInSec": 0,
+  "fadeOutSec": 0.5
+}

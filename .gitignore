@@ -1,0 +1,14 @@
+# PNG-оверлеи редакции и тестовые видео в git не кладём
+overlays/*
+!overlays/README.md
+*.mp4
+*.mov
+*.MOV
+*.mkv
+*.webm
+
+# будущая сборка .NET
+bin/
+obj/
+*.user
+.vs/

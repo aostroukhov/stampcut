@@ -1,0 +1,27 @@
+{
+  "id": "telegram-1080p",
+  "name": "Telegram 1080p (универсальный)",
+  "description": "H.264 + AAC, длинная сторона не больше 1920 px, не больше 30 к/с, SDR, moov в начале файла. Ориентация и пропорции исходника сохраняются.",
+  "container": "mp4",
+  "video": {
+    "codec": "h264",
+    "maxLongSide": 1920,
+    "fit": "keep",
+    "maxFps": 30,
+    "crf": 21,
+    "preset": "veryfast",
+    "profile": "high",
+    "level": "4.1",
+    "pixelFormat": "yuv420p",
+    "hdrToSdr": true,
+    "hardwareEncoder": "auto"
+  },
+  "audio": {
+    "codec": "aac",
+    "bitrateKbps": 128,
+    "sampleRate": 48000,
+    "loudnessNormalize": false
+  },
+  "fastStart": true,
+  "outputSuffix": "_tg"
+}
