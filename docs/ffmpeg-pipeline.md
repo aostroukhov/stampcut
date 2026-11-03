@@ -147,3 +147,50 @@ ffmpeg -y -i src.mov -vf "scale=w=-2:h=540,format=yuv420p" -c:v libx264 -preset 
 `-g 30` — ключевой кадр каждую секунду, чтобы перемотка в превью была отзывчивой.
 Для HDR-исходника в прокси тоже нужен тонмэппинг (иначе превью будет блёклым), но
 с уменьшением **до** тонмэппинга — это заметно быстрее.
+
+## 7. Ретушь: размытие и мозаика области (проверено)
+
+Область в пикселях исходника, до кропа и масштабирования. Размытие — вырезать, размыть, наложить обратно;
+мозаика — уменьшить и увеличить обратно с `flags=neighbor`. Интервал показа — `enable` на `overlay`.
+
+```
+[0:v]format=yuv420p[c0_0];
+[c0_0]split[c0_m1][c0_r1];
+[c0_r1]crop=192:108:960:540,boxblur=lr=25:lp=2:cr=12:cp=2[c0_b1];
+[c0_m1][c0_b1]overlay=x=960:y=540:enable='between(t,2,5)'[c0_1];
+[c0_1]split[c0_m2][c0_r2];
+[c0_r2]crop=384:216:0:0,scale=24:13:flags=area,scale=384:216:flags=neighbor[c0_b2];
+[c0_m2][c0_b2]overlay=x=0:y=0[c0_2]
+```
+
+Радиус размытия — `min(w,h) × сила / 25`, не больше половины меньшей стороны (ограничение `boxblur`).
+Мозаика: `24 − 2 × сила` блоков по меньшей стороне.
+
+## 8. Запикивание звука (проверено)
+
+Гейт громкости по времени плюс тон 1 кГц из `sine`, подмешанный только в интервалах «пик»:
+
+```
+ffmpeg -ss 1 -to 4 -i src.mp4 -f lavfi -t 3 -i sine=frequency=1000:sample_rate=48000 -filter_complex "
+[0:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=volume='if(between(t,0.2,1)+between(t,2,2.5),0,1)':eval=frame[a0_src];
+[1:a:0]aformat=sample_fmts=fltp:channel_layouts=stereo,volume=volume='if(between(t,0.2,1),0.25,0)':eval=frame[a0_beep];
+[a0_src][a0_beep]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a0]" -map 0:v -map "[a0]" …
+```
+
+Время — относительно начала обрезанного фрагмента (с `-ss` перед `-i` метки времени начинаются с нуля).
+
+## 9. Склейка (проверено)
+
+Каждый ролик режется своими `-ss/-to` перед `-i`, приводится к общему кадру (`scale` + `pad` или `crop`),
+общей частоте (`fps`) и `setsar=1`, звук — к 48 кГц стерео (`anullsrc` для роликов без звука), затем
+`[v0][a0][v1][a1][v2][a2]concat=n=3:v=1:a=1[vc][ac]`. Оверлеи накладываются уже на `[vc]`.
+
+Без перекодирования: concat-демуксер со списком `file/inpoint/outpoint` и `-c copy` — только для файлов
+с одинаковыми кодеком, размером, частотой и звуком.
+
+## 10. Авто-качество и совместимость (реализовано в `FFmpegCommandBuilder`)
+
+- `-crf 18` плюс `-maxrate`/`-bufsize` от битрейта исходника × (пиксели выхода / пиксели исходника) × (fps выхода / fps исходника) × 1,15, не ниже 1,5 Мбит/с.
+- Уровень H.264 по таблице A-1: 1080p30 → 4.1, 1080p60 → 4.2, 4K → 5.1/5.2.
+- `-g 2×fps`, `-color_primaries/-color_trc/-colorspace bt709`, `-movflags +faststart`, AAC 128k 48 кГц стерео.
+- Аппаратные кодеры: `h264_nvenc -rc vbr -cq N -maxrate`, `h264_qsv -b:v/-maxrate`, `h264_amf -rc vbr_peak`; декодирование `-hwaccel d3d11va`.

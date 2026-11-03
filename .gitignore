@@ -12,3 +12,16 @@ bin/
 obj/
 *.user
 .vs/
+
+# ffmpeg binaries
+tools/ffmpeg/*.exe
+tools/ffmpeg/*.dll
+
+# build output
+**/bin/
+**/obj/
+*.swp
+.vs/
+.idea/
+TestResults/
+dist/
