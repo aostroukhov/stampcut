@@ -39,9 +39,13 @@ public static class Program
 
         Logger.Info("StampCut " + MainWindow.AppVersion + " запуск: " + string.Join(" ", args));
         var files = args.Where(File.Exists).Select(Path.GetFullPath).ToList();
-        var window = new MainWindow(files, settings);
-        app.MainWindow = window;
-        window.Show();
+        // окно создаём после старта приложения: только тогда ресурсы темы Fluent уже загружены
+        app.Startup += (_, _) =>
+        {
+            var window = new MainWindow(files, settings);
+            app.MainWindow = window;
+            window.Show();
+        };
         return app.Run();
     }
 }

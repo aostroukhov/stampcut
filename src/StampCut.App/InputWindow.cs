@@ -14,6 +14,7 @@ public sealed class InputWindow : Window
     {
         Title = title; Width = 380; SizeToContent = SizeToContent.Height; ResizeMode = ResizeMode.NoResize;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        Ui.ApplyWindowTheme(this);
         _box.Text = initial;
         var ok = Ui.Button("OK", () => { DialogResult = true; Close(); }, primary: true, minWidth: 80);
         var cancel = Ui.Button(Lang.T("Отмена"), () => { DialogResult = false; Close(); }, minWidth: 80);

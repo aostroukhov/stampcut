@@ -16,7 +16,7 @@ public sealed partial class MainWindow
 
     private UIElement BuildClipsPanel()
     {
-        var panel = new DockPanel { Width = 230, Margin = new Thickness(10, 0, 8, 0) };
+        var panel = new DockPanel { Margin = new Thickness(10, 0, 4, 0) };
         var header = Ui.Row(Ui.Label(T("Ролики"), weight: FontWeights.Bold, size: 13));
         DockPanel.SetDock(header, Dock.Top);
         panel.Children.Add(header);
@@ -25,6 +25,7 @@ public sealed partial class MainWindow
             Ui.SmallButton("▲", () => MoveClip(-1), T("Выше")),
             Ui.SmallButton("▼", () => MoveClip(1), T("Ниже")),
             Ui.SmallButton("✕", RemoveClip, T("Убрать ролик из проекта")));
+        _clipButtons = buttons;
         DockPanel.SetDock(buttons, Dock.Bottom);
         panel.Children.Add(buttons);
 
@@ -137,6 +138,7 @@ public sealed partial class MainWindow
 
     private void ClearPreview()
     {
+        UpdateEnabledState();
         _timer.Stop();
         _mediaReady = false;
         _preview.CurrentClip = null; _preview.Player.Source = null; _preview.ShowPoster(null); _preview.ShowMessage(null); _preview.Refresh();
@@ -149,6 +151,7 @@ public sealed partial class MainWindow
     private void SelectClip(Clip clip, double? startAt = null, bool autoplay = true)
     {
         _current = clip;
+        UpdateEnabledState();
         _activeSegment = null;
         _selectedRedaction = null;
         RefreshClipList();

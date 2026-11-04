@@ -22,6 +22,11 @@ public sealed class AppSettings
     public double Volume { get; set; } = 0.8;
     /// <summary>Тема: system / light / dark.</summary>
     public string Theme { get; set; } = "system";
+    public double LeftPanelWidth { get; set; } = 240;
+    public double RightPanelWidth { get; set; } = 340;
+    public double WindowWidth { get; set; } = 1380;
+    public double WindowHeight { get; set; } = 840;
+    public bool WindowMaximized { get; set; }
 
     // --- «меньше кликов»: недавние папки и автоматические имена
     /// <summary>Куда класть экспорт: рядом с исходником, в последнюю использованную папку или в фиксированную (OutputDir).</summary>

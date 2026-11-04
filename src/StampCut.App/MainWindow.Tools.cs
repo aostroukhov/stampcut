@@ -22,7 +22,7 @@ public sealed partial class MainWindow
     private OverlaySettings? _selectedOverlay;
     private ComboBox _overlayPresetCombo = new();
     private readonly ListBox _overlayList = new() { MaxHeight = 70, Margin = new Thickness(0, 4, 0, 4) };
-    private readonly ComboBox _overlayFileCombo = new() { Width = 190 };
+    private readonly ComboBox _overlayFileCombo = new() { Width = 190, Height = Ui.ControlHeight };
     private TextBox _fadeIn = new(), _fadeOut = new(), _ovFrom = new(), _ovTo = new();
     private Slider _opacitySlider = new();
     private readonly TextBlock _opacityText = Ui.Label("80 %");
@@ -52,16 +52,18 @@ public sealed partial class MainWindow
 
     private UIElement BuildToolsPanel()
     {
-        var stack = new StackPanel { Width = 300, Margin = new Thickness(8, 0, 10, 0) };
+        var stack = new StackPanel { Margin = new Thickness(4, 0, 10, 0) };
+        _toolsStack = stack;
+        stack.RequestBringIntoView += (_, e) => e.Handled = true; // фокус в поле не должен прокручивать панель
         stack.Children.Add(BuildOverlaySection());
         stack.Children.Add(BuildFiltersSection());
         stack.Children.Add(BuildCropSection());
         stack.Children.Add(BuildRedactSection());
         stack.Children.Add(BuildCensorSection());
-        var scroll = new ScrollViewer { Content = stack, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
-        var dock = new DockPanel { Width = 320 };
+        var scroll = new ScrollViewer { Content = stack, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Focusable = false };
+        var dock = new DockPanel();
         var export = BuildExportBlock();
-        ((FrameworkElement)export).Margin = new Thickness(8, 0, 10, 0);
+        ((FrameworkElement)export).Margin = new Thickness(4, 0, 10, 0);
         DockPanel.SetDock(export, Dock.Bottom);
         dock.Children.Add(export);
         dock.Children.Add(scroll);
@@ -90,7 +92,7 @@ public sealed partial class MainWindow
                 _preview.Refresh();
             }
         };
-        _opacitySlider = Ui.Slider(0, 100, 80, v => { if (_selectedOverlay is null || _syncing) return; _selectedOverlay.Opacity = v / 100.0; _opacityText.Text = $"{v:0} %"; _preview.Refresh(); }, width: 150);
+        _opacitySlider = Ui.Slider(0, 100, 80, v => { if (_selectedOverlay is null || _syncing) return; _selectedOverlay.Opacity = v / 100.0; _opacityText.Text = $"{v:0} %"; _preview.Refresh(); }, width: 0);
         _ovWhole = new RadioButton { Content = T("весь ролик"), IsChecked = true, Margin = new Thickness(0, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center, Focusable = false };
         _ovRange = new RadioButton { Content = T("с"), VerticalAlignment = VerticalAlignment.Center, Focusable = false };
         _ovFrom = Ui.NumberBox(0, v => { if (_selectedOverlay is null) return; _selectedOverlay.FromSec = v; _ovRange.IsChecked = true; _preview.Refresh(); }, 52, "0.#");
@@ -103,7 +105,7 @@ public sealed partial class MainWindow
         _overlayEditor.Children.Add(Ui.Row(Ui.Label(T("Файл"), muted: true), _overlayFileCombo, Ui.SmallButton("…", BrowseOverlayFile, T("Выбрать PNG"))));
         _overlayEditor.Children.Add(Ui.Label(T("Перетащите оверлей мышью, размер меняйте за любую сторону или угол."), muted: true, size: 11));
         _overlayEditor.Children.Add(_overlaySizeText);
-        _overlayEditor.Children.Add(Ui.Row(Ui.Label(T("Прозрачность"), muted: true), _opacitySlider, _opacityText));
+        _overlayEditor.Children.Add(Ui.FormRow(T("Прозрачность"), _opacitySlider, _opacityText, trailingWidth: 44));
         _overlayEditor.Children.Add(Ui.Row(Ui.Label(T("Показ"), muted: true), _ovWhole, _ovRange, _ovFrom, Ui.Label(T("по"), muted: true), _ovTo, Ui.Label(T("сек"), muted: true)));
         _overlayEditor.Children.Add(Ui.Row(Ui.SmallButton(T("от текущей"), () => { if (_selectedOverlay is null) return; _selectedOverlay.FromSec = Math.Round(OutputTime(), 2); _ovRange.IsChecked = true; SyncOverlayPanel(); _preview.Refresh(); }),
                                            Ui.SmallButton(T("до текущей"), () => { if (_selectedOverlay is null) return; _selectedOverlay.ToSec = Math.Round(OutputTime(), 2); _ovRange.IsChecked = true; SyncOverlayPanel(); _preview.Refresh(); }),
@@ -332,13 +334,12 @@ public sealed partial class MainWindow
         };
         foreach (var (key, name, min, max, def) in defs)
         {
-            var value = Ui.Label(def.ToString(), muted: true); value.Width = 34; value.TextAlignment = TextAlignment.Right;
-            var label = Ui.Label(T(name), muted: true); label.Width = 110;
-            var slider = Ui.Slider(min, max, def, v => { if (_syncing || _current is null) return; SetFilter(key, (int)Math.Round(v)); }, width: 120);
+            var value = Ui.Label(def.ToString(), muted: true); value.TextAlignment = TextAlignment.Right;
+            var slider = Ui.Slider(min, max, def, v => { if (_syncing || _current is null) return; SetFilter(key, (int)Math.Round(v)); }, width: 0);
             slider.TickFrequency = 1; slider.IsSnapToTickEnabled = true;
             slider.MouseDoubleClick += (_, _) => slider.Value = def;
             _filterSliders[key] = (slider, value);
-            col.Children.Add(Ui.Row(label, slider, value));
+            col.Children.Add(Ui.FormRow(T(name), slider, value));
         }
         col.Children.Add(Ui.Label(T("Результат виден на паузе; при воспроизведении показывается исходник. Двойной клик по ползунку — сброс."), muted: true, size: 11));
         col.Children.Add(Ui.Row(
@@ -387,7 +388,7 @@ public sealed partial class MainWindow
     private UIElement BuildCropSection()
     {
         _cropToggle = Ui.Toggle(T("Изменить кроп"), false, v => { if (_syncing) return; if (v) SetEditMode(EditMode.Crop); else if (_preview.Mode == EditMode.Crop) SetEditMode(EditMode.View); });
-        var aspectCombo = new ComboBox { Width = 130 };
+        var aspectCombo = new ComboBox { Width = 130, Height = Ui.ControlHeight };
         foreach (var (name, _) in Aspects) aspectCombo.Items.Add(T(name));
         aspectCombo.SelectedIndex = 0;
         aspectCombo.SelectionChanged += (_, _) =>
@@ -445,8 +446,8 @@ public sealed partial class MainWindow
             int px = (int)Math.Round(v);
             if (_selectedRedaction.Mode == RedactMode.Pixelate) _selectedRedaction.BlockSize = px; else _selectedRedaction.BlurRadius = px;
             SyncEffectLabel(); _preview.Layout();
-        }, width: 130);
-        _redactModeCombo = new ComboBox { Width = 110 };
+        }, width: 0);
+        _redactModeCombo = new ComboBox { Width = 110, Height = Ui.ControlHeight };
         _redactModeCombo.Items.Add(T("Размытие")); _redactModeCombo.Items.Add(T("Мозаика"));
         _redactModeCombo.SelectionChanged += (_, _) => { if (_selectedRedaction is null || _syncing) return; _selectedRedaction.Mode = _redactModeCombo.SelectedIndex == 1 ? RedactMode.Pixelate : RedactMode.Blur; SyncRedactPanel(); _preview.Refresh(); RefreshClipList(); };
         _rdWhole = new RadioButton { Content = T("весь ролик"), IsChecked = true, Margin = new Thickness(0, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center, Focusable = false };
@@ -456,7 +457,10 @@ public sealed partial class MainWindow
         _rdWhole.Checked += (_, _) => { if (_selectedRedaction is null || _syncing) return; _selectedRedaction.FromSec = null; _selectedRedaction.ToSec = null; UpdateTimelineMarkers(); _preview.Layout(); };
         _rdRange.Checked += (_, _) => { if (_selectedRedaction is null || _syncing || _current is null) return; _selectedRedaction.FromSec ??= ActiveSegment?.InSec ?? 0; _selectedRedaction.ToSec ??= ActiveSegment?.OutSec ?? _current.Media.DurationSec; SyncRedactPanel(); UpdateTimelineMarkers(); };
 
-        _redactEditor.Children.Add(Ui.Row(Ui.Label(T("Эффект"), muted: true), _redactModeCombo, _effectLabel, _effectSlider, _effectValue));
+        _redactEditor.Children.Add(Ui.FormRow(T("Эффект"), _redactModeCombo));
+        var effectRow = Ui.FormRow("", _effectSlider, _effectValue, trailingWidth: 84);
+        effectRow.Children.Remove(effectRow.Children[0]); Grid.SetColumn(_effectLabel, 0); _effectLabel.VerticalAlignment = VerticalAlignment.Center; effectRow.Children.Add(_effectLabel);
+        _redactEditor.Children.Add(effectRow);
         _redactEditor.Children.Add(Ui.Row(Ui.Label(T("Показ"), muted: true), _rdWhole, _rdRange, _rdFrom, Ui.Label(T("по"), muted: true), _rdTo, Ui.Label(T("сек"), muted: true)));
         _redactEditor.Children.Add(Ui.Row(
             Ui.SmallButton(T("от текущей"), () => { if (_selectedRedaction is null) return; _selectedRedaction.FromSec = Math.Round(Position, 2); _selectedRedaction.ToSec ??= _current?.Media.DurationSec; SyncRedactPanel(); UpdateTimelineMarkers(); }),
@@ -542,7 +546,7 @@ public sealed partial class MainWindow
     private UIElement BuildCensorSection()
     {
         _censorList.SelectionChanged += (_, _) => UpdateTimelineMarkers();
-        var modeCombo = new ComboBox { Width = 90 };
+        var modeCombo = new ComboBox { Width = 90, Height = Ui.ControlHeight };
         modeCombo.Items.Add(T("пик")); modeCombo.Items.Add(T("тишина"));
         modeCombo.SelectedIndex = 0;
         modeCombo.SelectionChanged += (_, _) => { if (SelectedCensor is { } c) { c.Mode = modeCombo.SelectedIndex == 1 ? CensorMode.Mute : CensorMode.Beep; SyncCensorPanel(); } };

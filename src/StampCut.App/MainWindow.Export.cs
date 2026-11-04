@@ -21,9 +21,9 @@ public sealed partial class MainWindow
 
     private UIElement BuildExportBlock()
     {
-        _exportPresetCombo = Ui.Combo(_exportPresets, p => p.Name, _preset, OnExportPresetSelected, width: 250);
+        _exportPresetCombo = Ui.Combo(_exportPresets, p => p.Name, _preset, OnExportPresetSelected, width: 0);
         _exportButton = Ui.Button(T("Экспорт"), () => Fire(ExportAsync()), primary: true, tooltip: T("Экспортировать (Ctrl+E)"), minWidth: 120);
-        _exportButton.FontSize = 14; _exportButton.Padding = new Thickness(16, 8, 16, 8);
+        _exportButton.FontSize = 14; _exportButton.Height = 36; _exportButton.Padding = new Thickness(18, 0, 18, 0);
         var openFolder = Ui.SmallButton(T("Открыть папку"), OpenLastFolder, T("Открыть папку с результатом"));
         var col = Ui.Column(
             Ui.Header(T("ЭКСПОРТ")),
@@ -53,7 +53,7 @@ public sealed partial class MainWindow
         if (parent is null) return;
         int idx = parent.Children.IndexOf(_exportPresetCombo);
         parent.Children.RemoveAt(idx);
-        _exportPresetCombo = Ui.Combo(_exportPresets, p => p.Name, _preset, OnExportPresetSelected, width: 250);
+        _exportPresetCombo = Ui.Combo(_exportPresets, p => p.Name, _preset, OnExportPresetSelected, width: 0);
         parent.Children.Insert(idx, _exportPresetCombo);
         RefreshOverlayPresetCombo();
         UpdateExportInfo();
@@ -80,7 +80,7 @@ public sealed partial class MainWindow
 
     private void UpdateExportInfo()
     {
-        if (_clips.Count == 0) { _exportTarget.Text = T("Добавьте ролик"); _exportDetails.Text = ""; _exportButton.IsEnabled = false; return; }
+        if (_clips.Count == 0) { _exportTarget.Text = T("Добавьте ролик"); _exportDetails.Text = ""; _exportButton.IsEnabled = false; UpdateEnabledState(); return; }
         _exportButton.IsEnabled = _exportCts is null;
         var path = BuildOutputPath(_clips[0]);
         _exportTarget.Text = $"→ {Path.GetFileName(path)}\n{Path.GetDirectoryName(path)}";

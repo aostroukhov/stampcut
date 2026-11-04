@@ -43,6 +43,9 @@ public sealed partial class MainWindow : Window
     private readonly Border _infoBar = new() { Visibility = Visibility.Collapsed, Padding = new Thickness(10, 6, 10, 6), Margin = new Thickness(0, 0, 0, 6), CornerRadius = new CornerRadius(6) };
     private readonly StackPanel _infoContent = new() { Orientation = Orientation.Horizontal };
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(33) };
+    private UIElement _transport = new Grid();
+    private UIElement _toolsStack = new Grid();
+    private UIElement _clipButtons = new Grid();
 
     public static string AppVersion => typeof(MainWindow).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
         .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion.Split('+')[0] ?? "0.0.0";
@@ -56,18 +59,22 @@ public sealed partial class MainWindow : Window
         _overlayPresets = _s.Presets.LoadOverlayPresets();
 
         Title = "StampCut " + AppVersion;
-        MinWidth = 1100; MinHeight = 680; Width = 1380; Height = 840;
+        MinWidth = 1100; MinHeight = 680;
+        Width = Math.Max(1100, _s.Settings.WindowWidth); Height = Math.Max(680, _s.Settings.WindowHeight);
+        if (_s.Settings.WindowMaximized) WindowState = WindowState.Maximized;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         AllowDrop = true;
-        try { Icon = BitmapFrame.Create(new Uri("pack://application:,,,/Assets/icon.ico")); } catch (Exception ex) { Logger.Warn("Иконка: " + ex.Message); }
+        Ui.ApplyWindowTheme(this);
+        try { if (Ui.AppIcon() is { } ico) Icon = ico.Frame; } catch (Exception ex) { Logger.Warn("Иконка: " + ex.Message); }
 
         _cancelButton = Ui.SmallButton(T("Отмена"), CancelExport);
         _cancelButton.Visibility = Visibility.Collapsed;
         _playButton = Ui.Button("▶", TogglePlay, tooltip: T("Воспроизведение / пауза (Пробел)"), minWidth: 48);
-        _playButton.FontSize = 15;
+        _playButton.FontSize = 15; _playButton.Padding = new Thickness(14, 0, 14, 0);
 
         Content = BuildLayout();
         WireEvents();
+        UpdateEnabledState();
         _timeline.SnapToKeyframes = _preset.StreamCopy;
         _statusInfo.Text = T("Перетащите видео в окно или нажмите «Открыть»");
 
@@ -90,6 +97,8 @@ public sealed partial class MainWindow : Window
             _timer.Stop();
             _exportCts?.Cancel();
             _proxyCts?.Cancel();
+            _s.Settings.WindowMaximized = WindowState == WindowState.Maximized;
+            if (WindowState == WindowState.Normal) { _s.Settings.WindowWidth = Width; _s.Settings.WindowHeight = Height; }
             try { _s.Settings.Save(); } catch { }
         };
     }
@@ -125,13 +134,27 @@ public sealed partial class MainWindow : Window
         DockPanel.SetDock(status, Dock.Bottom);
         dock.Children.Add(status);
 
-        var left = BuildClipsPanel();
-        DockPanel.SetDock(left, Dock.Left);
-        dock.Children.Add(left);
+        // три колонки с разделителями: ширина боковых панелей меняется мышью и запоминается
+        var columns = new Grid();
+        var leftCol = new ColumnDefinition { Width = new GridLength(Math.Clamp(_s.Settings.LeftPanelWidth, 160, 600)), MinWidth = 160 };
+        var rightCol = new ColumnDefinition { Width = new GridLength(Math.Clamp(_s.Settings.RightPanelWidth, 280, 700)), MinWidth = 280 };
+        columns.ColumnDefinitions.Add(leftCol);
+        columns.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 400 });
+        columns.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        columns.ColumnDefinitions.Add(rightCol);
 
+        var left = BuildClipsPanel();
+        Grid.SetColumn(left, 0); columns.Children.Add(left);
+        var splitLeft = new GridSplitter { Width = 6, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Stretch, Background = Brushes.Transparent, ShowsPreview = false, Focusable = false };
+        Grid.SetColumn(splitLeft, 1); columns.Children.Add(splitLeft);
         var right = BuildToolsPanel();
-        DockPanel.SetDock(right, Dock.Right);
-        dock.Children.Add(right);
+        Grid.SetColumn(right, 4); columns.Children.Add(right);
+        var splitRight = new GridSplitter { Width = 6, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Stretch, Background = Brushes.Transparent, ShowsPreview = false, Focusable = false };
+        Grid.SetColumn(splitRight, 3); columns.Children.Add(splitRight);
+        splitLeft.DragCompleted += (_, _) => { _s.Settings.LeftPanelWidth = leftCol.ActualWidth; };
+        splitRight.DragCompleted += (_, _) => { _s.Settings.RightPanelWidth = rightCol.ActualWidth; };
+        dock.Children.Add(columns);
 
         var center = new Grid();
         center.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -143,41 +166,50 @@ public sealed partial class MainWindow : Window
         var previewBorder = new Border { Child = _preview, Background = Ui.PreviewBg, CornerRadius = new CornerRadius(8), Margin = new Thickness(0, 0, 0, 6), ClipToBounds = true };
         Grid.SetRow(previewBorder, 1); center.Children.Add(previewBorder);
         var transport = BuildTransport();
+        _transport = transport;
         Grid.SetRow(transport, 2); center.Children.Add(transport);
         Grid.SetRow(_timeline, 3); center.Children.Add(_timeline);
         _timeline.Margin = new Thickness(0, 0, 0, 2);
-        dock.Children.Add(center);
+        Grid.SetColumn(center, 2); columns.Children.Add(center);
         return dock;
     }
 
     private UIElement BuildTransport()
     {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
-        row.Children.Add(Ui.Button("⏮", () => Seek(ActiveSegment?.InSec ?? 0), tooltip: T("К точке входа (Home)"), minWidth: 36));
-        row.Children.Add(Ui.Button("◁", () => StepFrame(-1), tooltip: T("Кадр назад (,)"), minWidth: 36));
-        row.Children.Add(_playButton);
-        row.Children.Add(Ui.Button("▷", () => StepFrame(1), tooltip: T("Кадр вперёд (.)"), minWidth: 36));
-        row.Children.Add(Ui.Button("⏭", () => Seek(ActiveSegment?.OutSec ?? 0), tooltip: T("К точке выхода (End)"), minWidth: 36));
-        _timeText.Margin = new Thickness(10, 0, 12, 0);
+        // строка 1: плеер слева, обрезка справа; строка 2: режим, громкость, сведения о фрагментах
+        var line1 = new DockPanel { Margin = new Thickness(0, 0, 0, 2), LastChildFill = true };
+        var trim = Ui.Row(
+            Ui.Button(T("[ Вход"), SetInHere, tooltip: T("Точка входа = текущая позиция (I)")),
+            Ui.Button(T("Выход ]"), SetOutHere, tooltip: T("Точка выхода = текущая позиция (O)")),
+            Ui.SmallButton(T("+ Фрагмент"), AddSegmentHere, T("Новый фрагмент от текущей позиции")),
+            Ui.SmallButton(T("✕ Фрагмент"), RemoveActiveSegment, T("Удалить выбранный фрагмент")),
+            Ui.SmallButton(T("Сброс"), ResetTrim, T("Убрать обрезку")));
+        trim.Margin = new Thickness(0);
+        DockPanel.SetDock(trim, Dock.Right);
+        line1.Children.Add(trim);
         _timeText.FontFamily = new FontFamily("Consolas");
-        row.Children.Add(_timeText);
-        row.Children.Add(Ui.Button(T("[ Вход"), SetInHere, tooltip: T("Точка входа = текущая позиция (I)")));
-        row.Children.Add(Ui.Button(T("Выход ]"), SetOutHere, tooltip: T("Точка выхода = текущая позиция (O)")));
-        row.Children.Add(Ui.SmallButton(T("+ Фрагмент"), AddSegmentHere, T("Новый фрагмент от текущей позиции")));
-        row.Children.Add(Ui.SmallButton(T("✕ Фрагмент"), RemoveActiveSegment, T("Удалить выбранный фрагмент")));
-        row.Children.Add(Ui.SmallButton(T("Сброс"), ResetTrim, T("Убрать обрезку")));
-        row.Children.Add(Ui.Toggle(T("По склейке"), true, v => _followEdit = v, T("Проигрывать только фрагменты и переходить к следующему ролику — как в результате")));
-        var vol = Ui.Label("🔊", size: 13);
-        vol.Margin = new Thickness(8, 0, 2, 0);
-        _volume = Ui.Slider(-20, 20, 0, v => { if (_syncing) return; SetGain(Math.Round(v)); }, width: 110);
+        var play = Ui.Row(
+            Ui.Button("⏮", () => Seek(ActiveSegment?.InSec ?? 0), tooltip: T("К точке входа (Home)"), minWidth: 36),
+            Ui.Button("◁", () => StepFrame(-1), tooltip: T("Кадр назад (,)"), minWidth: 36),
+            _playButton,
+            Ui.Button("▷", () => StepFrame(1), tooltip: T("Кадр вперёд (.)"), minWidth: 36),
+            Ui.Button("⏭", () => Seek(ActiveSegment?.OutSec ?? 0), tooltip: T("К точке выхода (End)"), minWidth: 36),
+            _timeText);
+        play.Margin = new Thickness(0);
+        _timeText.Margin = new Thickness(8, 0, 0, 0);
+        line1.Children.Add(play);
+
+        _volume = Ui.Slider(-20, 20, 0, v => { if (_syncing) return; SetGain(Math.Round(v)); }, width: 120);
         _volume.TickFrequency = 1; _volume.IsSnapToTickEnabled = true;
         _volume.ToolTip = T("Громкость ролика (↑ ↓): так он играет здесь и с таким уровнем уйдёт в экспорт");
-        row.Children.Add(vol);
-        row.Children.Add(_volume);
-        row.Children.Add(_gainText);
-        _fragmentText.Margin = new Thickness(10, 0, 0, 0);
-        row.Children.Add(_fragmentText);
-        return row;
+        var vol = Ui.Label("🔊", size: 13);
+        vol.Margin = new Thickness(10, 0, 2, 0);
+        _gainText.Width = 48;
+        var line2 = Ui.Row(
+            Ui.Toggle(T("По склейке"), true, v => _followEdit = v, T("Проигрывать только фрагменты и переходить к следующему ролику — как в результате")),
+            vol, _volume, _gainText, _fragmentText);
+        line2.Margin = new Thickness(0, 0, 0, 2);
+        return Ui.Column(line1, line2);
     }
 
     private void WireEvents()
@@ -385,6 +417,18 @@ public sealed partial class MainWindow : Window
         if (project is not null) { await OpenProjectAsync(project); list.Remove(project); replace = false; }
         var videos = list.Where(f => IsVideoFile(f) || !Path.HasExtension(f) || File.Exists(f)).Where(f => !Core.Presets.ProjectStore.IsProjectFile(f)).ToList();
         if (videos.Count > 0) await AddFilesAsync(videos, replace);
+    }
+
+    /// <summary>Пока нет ни одного ролика, инструменты и управление воспроизведением неактивны.</summary>
+    private void UpdateEnabledState()
+    {
+        bool hasClip = _current is not null;
+        _transport.IsEnabled = hasClip;
+        _toolsStack.IsEnabled = hasClip;
+        _timeline.IsEnabled = hasClip;
+        _timeline.Opacity = hasClip ? 1 : 0.5;
+        _clipButtons.IsEnabled = _clips.Count > 0;
+        _exportButton.IsEnabled = _clips.Count > 0 && _exportCts is null;
     }
 
     /// <summary>Запуск задачи «в фоне» так, чтобы её ошибка попала в журнал и в полосу уведомлений, а не потерялась.</summary>

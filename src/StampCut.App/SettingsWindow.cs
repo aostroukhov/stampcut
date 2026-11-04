@@ -21,15 +21,16 @@ public sealed class SettingsWindow : Window
         _s = s;
         Title = T("Настройки StampCut"); Width = 600; SizeToContent = SizeToContent.Height; ResizeMode = ResizeMode.NoResize;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        Ui.ApplyWindowTheme(this);
         var st = s.Settings;
 
         // внешний вид
         var themes = new[] { ("system", T("Как в Windows")), ("light", T("Светлая")), ("dark", T("Тёмная")) };
-        var themeCombo = new ComboBox { Width = 180 };
+        var themeCombo = new ComboBox { Width = 180, Height = Ui.ControlHeight };
         foreach (var (_, name) in themes) themeCombo.Items.Add(name);
         themeCombo.SelectedIndex = Math.Max(0, Array.FindIndex(themes, t => t.Item1 == st.Theme));
         var langs = new[] { ("ru", "Русский"), ("en", "English") };
-        var langCombo = new ComboBox { Width = 120 };
+        var langCombo = new ComboBox { Width = 120, Height = Ui.ControlHeight };
         foreach (var (_, name) in langs) langCombo.Items.Add(name);
         langCombo.SelectedIndex = Math.Max(0, Array.FindIndex(langs, l => l.Item1 == st.Language));
 
@@ -37,13 +38,13 @@ public sealed class SettingsWindow : Window
         var rbNext = new RadioButton { GroupName = "outloc", Content = T("рядом с исходником"), IsChecked = st.OutputLocation == OutputLocation.NextToSource, Margin = new Thickness(0, 2, 0, 2) };
         var rbLast = new RadioButton { GroupName = "outloc", Content = T("в последнюю использованную папку"), IsChecked = st.OutputLocation == OutputLocation.LastUsed, Margin = new Thickness(0, 2, 0, 2) };
         var rbFixed = new RadioButton { GroupName = "outloc", Content = T("всегда в папку:"), IsChecked = st.OutputLocation == OutputLocation.Fixed, Margin = new Thickness(0, 2, 0, 2) };
-        var fixedDir = new TextBox { Text = st.OutputDir ?? "", Width = 330, Padding = new Thickness(4, 3, 4, 3) };
-        var pattern = new TextBox { Text = st.FileNamePattern, Width = 200, Padding = new Thickness(4, 3, 4, 3) };
+        var fixedDir = new TextBox { Text = st.OutputDir ?? "", Width = 330, Height = Ui.ControlHeight, Padding = new Thickness(4, 0, 4, 0), VerticalContentAlignment = VerticalAlignment.Center };
+        var pattern = new TextBox { Text = st.FileNamePattern, Width = 200, Height = Ui.ControlHeight, Padding = new Thickness(4, 0, 4, 0), VerticalContentAlignment = VerticalAlignment.Center };
         var openAfter = Ui.Check(T("После экспорта показать файл в проводнике"), st.OpenFolderAfterExport, _ => { });
 
         // GPU
         var encoders = new[] { HardwareEncoder.Auto, HardwareEncoder.None, HardwareEncoder.Nvenc, HardwareEncoder.Qsv, HardwareEncoder.Amf, HardwareEncoder.MediaFoundation };
-        var encCombo = new ComboBox { Width = 220 };
+        var encCombo = new ComboBox { Width = 220, Height = Ui.ControlHeight };
         foreach (var e in encoders) encCombo.Items.Add(HardwareDetector.DisplayName(e));
         encCombo.SelectedIndex = Array.IndexOf(encoders, st.Encoder);
         var hwDecode = Ui.Check(T("Аппаратное декодирование (D3D11VA)"), st.HardwareDecode, _ => { });
@@ -52,8 +53,8 @@ public sealed class SettingsWindow : Window
             + (string.IsNullOrEmpty(s.Hardware.NvidiaDriver) ? "" : $"\n{s.Hardware.GpuName}, {T("драйвер NVIDIA")} {s.Hardware.NvidiaDriver}")
             + (string.IsNullOrEmpty(s.CachedRecommendation) ? "" : "\n⚠ " + s.CachedRecommendation), muted: true, size: 11);
 
-        var libDir = new TextBox { Text = st.LibraryDir ?? "", Width = 330, Padding = new Thickness(4, 3, 4, 3) };
-        var ffDir = new TextBox { Text = st.FfmpegDir ?? "", Width = 330, Padding = new Thickness(4, 3, 4, 3) };
+        var libDir = new TextBox { Text = st.LibraryDir ?? "", Width = 330, Height = Ui.ControlHeight, Padding = new Thickness(4, 0, 4, 0), VerticalContentAlignment = VerticalAlignment.Center };
+        var ffDir = new TextBox { Text = st.FfmpegDir ?? "", Width = 330, Height = Ui.ControlHeight, Padding = new Thickness(4, 0, 4, 0), VerticalContentAlignment = VerticalAlignment.Center };
 
         var ok = Ui.Button(T("Сохранить"), () =>
         {

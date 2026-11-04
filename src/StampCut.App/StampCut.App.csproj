@@ -18,6 +18,6 @@
     <ProjectReference Include="../StampCut.Core/StampCut.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <Resource Include="Assets/icon.ico" />
+    <EmbeddedResource Include="Assets/icon.ico" LogicalName="StampCut.icon.ico" />
   </ItemGroup>
 </Project>

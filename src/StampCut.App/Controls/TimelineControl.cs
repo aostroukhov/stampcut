@@ -52,9 +52,11 @@ public sealed class TimelineControl : FrameworkElement
     {
         base.OnRender(dc);
         double h = ActualHeight;
-        var track = Ui.ThemeBrush("ControlStrongFillColorDisabledBrush", new SolidColorBrush(Color.FromRgb(0xE1, 0xE4, 0xE8)));
-        var accent = Ui.ThemeBrush("AccentFillColorDefaultBrush", Ui.Accent);
-        var textBrush = Ui.ThemeBrush("TextFillColorSecondaryBrush", Ui.Muted);
+        // кисти темы нельзя клонировать/замораживать — берём только цвета
+        var track = Ui.Solid(Ui.ThemeColor("ControlStrongFillColorDisabledBrush", Color.FromRgb(0xE1, 0xE4, 0xE8)));
+        var accentColor = Ui.ThemeColor("AccentFillColorDefaultBrush", Color.FromRgb(0x00, 0x67, 0xC0));
+        var accent = Ui.Solid(accentColor);
+        var textBrush = Ui.Solid(Ui.ThemeColor("TextFillColorSecondaryBrush", Color.FromRgb(0x6B, 0x72, 0x80)));
         var playhead = Ui.Danger;
 
         dc.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, ActualWidth, h));
@@ -64,7 +66,7 @@ public sealed class TimelineControl : FrameworkElement
         foreach (var s in Segments)
         {
             bool active = ReferenceEquals(s, ActiveSegment);
-            var fill = accent.Clone(); fill.Opacity = active ? 0.55 : 0.28; fill.Freeze();
+            var fill = Ui.Solid(accentColor, active ? 0.55 : 0.28);
             dc.DrawRectangle(fill, null, new Rect(X(s.InSec), TrackTop, Math.Max(1, X(s.OutSec) - X(s.InSec)), TrackH));
         }
 
