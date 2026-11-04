@@ -104,7 +104,7 @@ public static class Ui
 
     public static TextBlock Header(string text)
     {
-        var tb = new TextBlock { Text = text, FontSize = 12, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 8, 0, 4) };
+        var tb = new TextBlock { Text = text, FontSize = 12, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 6) };
         Themed(tb, TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush", Muted);
         return tb;
     }
@@ -199,7 +199,7 @@ public static class Ui
 
     public static Border Card(UIElement content)
     {
-        var b = new Border { Child = content, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(12, 6, 12, 10), Margin = new Thickness(0, 0, 0, 8) };
+        var b = new Border { Child = content, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(12, 8, 12, 10), Margin = new Thickness(0, 0, 0, 8) };
         Themed(b, Border.BackgroundProperty, "CardBackgroundFillColorDefaultBrush", CardBg);
         Themed(b, Border.BorderBrushProperty, "CardStrokeColorDefaultBrush", CardBorder);
         return b;

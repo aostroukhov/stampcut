@@ -84,17 +84,17 @@ public sealed class SettingsWindow : Window
                 {
                     Ui.Header(T("ВНЕШНИЙ ВИД")),
                     Ui.Row(Ui.Label(T("Тема:"), muted: true), themeCombo, Ui.Label(T("Язык:"), muted: true), langCombo),
-                    Ui.Header(T("КУДА СОХРАНЯТЬ")),
+                    Gap(), Ui.Header(T("КУДА СОХРАНЯТЬ")),
                     rbNext, rbLast, Ui.Row(rbFixed, fixedDir, Ui.SmallButton("…", () => PickFolder(fixedDir))),
                     Ui.Row(Ui.Label(T("Имя файла:"), muted: true), pattern, Ui.Label("{name} {suffix} {date} {time}", muted: true, size: 11)),
                     openAfter,
-                    Ui.Header("GPU"),
+                    Gap(), Ui.Header("GPU"),
                     Ui.Row(Ui.Label(T("Кодирование:"), muted: true), encCombo, Ui.SmallButton(T("Проверить заново"), () => { RedetectRequested = true; hwInfo.Text = T("Проверка запустится после сохранения."); })),
                     hwDecode, alwaysProxy, hwInfo,
-                    Ui.Header(T("ОБЩАЯ БИБЛИОТЕКА РЕДАКЦИИ")),
+                    Gap(), Ui.Header(T("ОБЩАЯ БИБЛИОТЕКА РЕДАКЦИИ")),
                     Ui.Label(T("Папка (можно сетевую или в облаке) с подпапками overlays и presets — у всех сотрудников одинаковые оверлеи и пресеты."), muted: true, size: 11),
                     Ui.Row(libDir, Ui.SmallButton("…", () => PickFolder(libDir))),
-                    Ui.Header("FFMPEG"),
+                    Gap(), Ui.Header("FFMPEG"),
                     Ui.Label($"{T("Сейчас: ")}{s.Ffmpeg.Ffmpeg}", muted: true, size: 11),
                     Ui.Row(ffDir, Ui.SmallButton("…", () => PickFolder(ffDir))),
                     Ui.Row(Ui.SmallButton(T("Открыть папку журналов"), () => { try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(AppPaths.LogDir) { UseShellExecute = true }); } catch { } }),
@@ -105,6 +105,8 @@ public sealed class SettingsWindow : Window
             },
         };
     }
+
+    private static FrameworkElement Gap() => new Border { Height = 10 };
 
     private void PickFolder(TextBox target)
     {
