@@ -96,11 +96,14 @@ public enum OutputLocation { NextToSource, LastUsed, Fixed }
 
 public sealed class HardwareCache
 {
+    /// <summary>Версия алгоритма проверки: при изменении кэш не используется.</summary>
+    public int DetectorVersion { get; set; }
     public string FfmpegVersion { get; set; } = "";
     public List<HardwareEncoder> Encoders { get; set; } = new();
     public string HwAccel { get; set; } = "";
     public DateTime DetectedAtUtc { get; set; }
     public string Recommendation { get; set; } = "";
+    public List<HardwareEncoder> EncodersWithoutHwDecode { get; set; } = new();
     public string GpuName { get; set; } = "";
     public string NvidiaDriver { get; set; } = "";
 }

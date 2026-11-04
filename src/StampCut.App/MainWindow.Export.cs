@@ -137,7 +137,7 @@ public sealed partial class MainWindow
         var job = new ExportJob
         {
             Clips = _clips.ToList(), Overlays = resolved, Preset = _preset, OutputPath = outputPath,
-            Encoder = encoder, HwAccel = _preset.StreamCopy ? "" : _s.ResolveHwAccel(),
+            Encoder = encoder, HwAccel = _preset.StreamCopy ? "" : _s.ResolveHwAccel(encoder),
         };
         var errors = FFmpegCommandBuilder.Validate(job);
         if (errors.Count > 0) { ShowInfo(string.Join(" ", errors), InfoKind.Error); _statusInfo.Text = ""; return; }

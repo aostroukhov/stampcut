@@ -42,7 +42,7 @@ public sealed partial class MainWindow : Window
     private Slider _volume = new();
     private readonly TextBlock _gainText = Ui.Label("0 дБ", muted: true);
     private readonly Border _infoBar = new() { Visibility = Visibility.Collapsed, Padding = new Thickness(10, 6, 10, 6), Margin = new Thickness(0, 0, 0, 6), CornerRadius = new CornerRadius(6) };
-    private readonly StackPanel _infoContent = new() { Orientation = Orientation.Horizontal };
+    private readonly WrapPanel _infoContent = new() { Orientation = Orientation.Horizontal };
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(33) };
     private UIElement _transport = new Grid();
     private readonly TextBlock _titleText = Ui.Label("StampCut");
@@ -477,8 +477,8 @@ public sealed partial class MainWindow : Window
     {
         _infoContent.Children.Clear();
         var tb = Ui.Label(text);
-        tb.Margin = new Thickness(0, 0, 12, 0);
-        tb.MaxWidth = 700;
+        tb.Margin = new Thickness(0, 0, 12, 4);
+        tb.MaxWidth = 760;
         _infoContent.Children.Add(tb);
         foreach (var (label, action) in buttons) _infoContent.Children.Add(Ui.SmallButton(label, action));
         _infoContent.Children.Add(Ui.SmallButton("✕", HideInfo, T("Скрыть")));

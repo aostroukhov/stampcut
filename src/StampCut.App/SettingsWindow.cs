@@ -21,7 +21,7 @@ public sealed class SettingsWindow : Window
         _s = s;
         Title = T("Настройки StampCut"); Width = 600; SizeToContent = SizeToContent.Height; ResizeMode = ResizeMode.NoResize;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
-        Ui.ApplyWindowTheme(this);
+        Ui.ApplyWindowTheme(this, solidBackground: true);
         var st = s.Settings;
 
         // внешний вид

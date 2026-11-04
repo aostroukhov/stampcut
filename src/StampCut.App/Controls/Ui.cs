@@ -38,9 +38,11 @@ public static class Ui
     public static SolidColorBrush Solid(Color c, double opacity = 1) { var b = new SolidColorBrush(c) { Opacity = opacity }; b.Freeze(); return b; }
 
     /// <summary>Основной цвет текста окна: TextBlock наследует его, иначе в тёмной теме текст остаётся чёрным.</summary>
-    public static void ApplyWindowTheme(Window w)
+    public static void ApplyWindowTheme(Window w, bool solidBackground = false)
     {
         Themed(w, Control.ForegroundProperty, "TextFillColorPrimaryBrush", Brushes.Black);
+        // у диалогов фиксированного размера подложка Mica не работает, прозрачный фон темы становится чёрным — даём сплошной фон
+        if (solidBackground) Themed(w, Control.BackgroundProperty, "SolidBackgroundFillColorBaseBrush", new SolidColorBrush(Color.FromRgb(0xF3, 0xF3, 0xF3)));
         w.FontFamily = Font;
         w.FontSize = FontBody;
     }

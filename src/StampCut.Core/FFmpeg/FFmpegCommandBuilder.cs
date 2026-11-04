@@ -217,7 +217,8 @@ public static class FFmpegCommandBuilder
             g.Append($"[{v}][ov{j}]overlay=x={rect.X}:y={rect.Y}:format=auto{enable}[vo{j}];");
             v = $"vo{j}";
         }
-        g.Append($"[{v}]format=yuv420p[vout]");
+        // аппаратные кодеры (NVENC через устройство D3D11, QSV, AMF, MF) принимают NV12; YUV420P — только libx264
+        g.Append($"[{v}]format={(job.Encoder == HardwareEncoder.None ? "yuv420p" : "nv12")}[vout]");
         r.FilterGraph = g.ToString();
 
         a.AddRange(new[] { "-filter_complex", r.FilterGraph, "-map", "[vout]" });

@@ -7,6 +7,8 @@ public sealed class HardwareCapabilities
     public string FfmpegVersion { get; init; } = "";
     public List<HardwareEncoder> Encoders { get; init; } = new();
     public List<string> HwAccels { get; init; } = new();
+    /// <summary>Кодеры, которые работают только с программным декодированием (связка с hwaccel падает).</summary>
+    public List<HardwareEncoder> EncodersWithoutHwDecode { get; init; } = new();
     public bool HasFilter_Zscale { get; init; }
     public bool HasFilter_Tonemap { get; init; }
 
@@ -41,6 +43,9 @@ public sealed class HardwareCapabilities
         OperatingSystem.IsWindows()
             ? (HwAccels.Contains("d3d11va") ? "d3d11va" : HwAccels.Contains("dxva2") ? "dxva2" : "")
             : (HwAccels.Contains("vaapi") ? "vaapi" : "");
+
+    /// <summary>Аппаратное декодирование для выбранного кодера: пусто, если их связка не работает.</summary>
+    public string HwAccelFor(HardwareEncoder encoder) => EncodersWithoutHwDecode.Contains(encoder) ? "" : PreferredHwAccel;
 
     public HardwareEncoder Resolve(HardwareEncoder requested)
     {
@@ -96,46 +101,60 @@ public sealed class HardwareDetector
         foreach (var e in new[] { HardwareEncoder.Nvenc, HardwareEncoder.Qsv, HardwareEncoder.Amf, HardwareEncoder.MediaFoundation })
             if (enc.StdOut.Contains(" " + EncoderName(e) + " ", StringComparison.Ordinal)) listed.Add(e);
 
-        var working = new List<HardwareEncoder>();
-        string nvencFailure = "", nvencRequired = "";
-        foreach (var e in listed)
-        {
-            ct.ThrowIfCancellationRequested();
-            var (ok, why) = await TestEncoderAsync(EncoderName(e), ct).ConfigureAwait(false);
-            log?.Invoke($"{EncoderName(e)}: {(ok ? "работает" : "недоступен — " + why)}");
-            if (ok) working.Add(e);
-            else if (e == HardwareEncoder.Nvenc)
-            {
-                nvencFailure = why;
-                // ffmpeg пишет: "Minimum required Nvidia driver for nvenc is 570.0 or newer"
-                var m = System.Text.RegularExpressions.Regex.Match(why, @"driver for nvenc is (\d+(?:\.\d+)?)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                if (m.Success) nvencRequired = m.Groups[1].Value;
-            }
-        }
-        var (gpuName, driver) = await NvidiaInfoAsync(ct).ConfigureAwait(false);
-        if (!string.IsNullOrEmpty(driver)) log?.Invoke($"NVIDIA: {gpuName}, драйвер {driver}");
-
         var listedAccels = hw.StdOut.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0 && !l.StartsWith("Hardware", StringComparison.Ordinal)).ToList();
-        // аппаратное декодирование проверяем реальным декодированием: в списке может быть vaapi/cuda без устройства
         var accels = new List<string>();
-        var candidates = OperatingSystem.IsWindows() ? new[] { "d3d11va", "dxva2", "cuda" } : new[] { "vaapi", "cuda" };
+        var working = new List<HardwareEncoder>();
+        var withoutHw = new List<HardwareEncoder>();
+        string nvencFailure = "", nvencRequired = "";
         string? sample = null;
         try
         {
-            foreach (var name in candidates.Where(listedAccels.Contains))
+            sample = await MakeSampleAsync(ct).ConfigureAwait(false);
+            // 1) аппаратное декодирование — реальным декодированием: в списке может быть vaapi/cuda без устройства
+            var candidates = OperatingSystem.IsWindows() ? new[] { "d3d11va", "dxva2", "cuda" } : new[] { "vaapi", "cuda" };
+            if (sample is not null)
+                foreach (var name in candidates.Where(listedAccels.Contains))
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var ok = await TestHwAccelAsync(name, sample, ct).ConfigureAwait(false);
+                    log?.Invoke($"hwaccel {name}: {(ok ? "работает" : "недоступен")}");
+                    if (ok) accels.Add(name);
+                }
+            string preferred = OperatingSystem.IsWindows()
+                ? (accels.Contains("d3d11va") ? "d3d11va" : accels.Contains("dxva2") ? "dxva2" : "")
+                : (accels.Contains("vaapi") ? "vaapi" : "");
+
+            // 2) кодеры — в той же связке, что при экспорте: hwaccel-декодирование → nv12 → кодер
+            foreach (var e in listed)
             {
                 ct.ThrowIfCancellationRequested();
-                sample ??= await MakeSampleAsync(ct).ConfigureAwait(false);
-                if (sample is null) break;
-                var ok = await TestHwAccelAsync(name, sample, ct).ConfigureAwait(false);
-                log?.Invoke($"hwaccel {name}: {(ok ? "работает" : "недоступен")}");
-                if (ok) accels.Add(name);
+                var (ok, why) = await TestEncoderAsync(EncoderName(e), sample, preferred, ct).ConfigureAwait(false);
+                if (!ok && preferred != "" && sample is not null)
+                {
+                    var (ok2, why2) = await TestEncoderAsync(EncoderName(e), sample, "", ct).ConfigureAwait(false);
+                    if (ok2) { withoutHw.Add(e); log?.Invoke($"{EncoderName(e)}: работает только с программным декодированием ({why})"); ok = true; }
+                    else why = why2;
+                }
+                if (ok) { working.Add(e); if (!withoutHw.Contains(e)) log?.Invoke($"{EncoderName(e)}: работает"); }
+                else
+                {
+                    log?.Invoke($"{EncoderName(e)}: недоступен — {why}");
+                    if (e == HardwareEncoder.Nvenc)
+                    {
+                        nvencFailure = why;
+                        // ffmpeg пишет: "Minimum required Nvidia driver for nvenc is 570.0 or newer"
+                        var m = System.Text.RegularExpressions.Regex.Match(why, @"driver for nvenc is (\d+(?:\.\d+)?)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                        if (m.Success) nvencRequired = m.Groups[1].Value;
+                    }
+                }
             }
         }
         finally
         {
             if (sample is not null) try { File.Delete(sample); } catch { }
         }
+        var (gpuName, driver) = await NvidiaInfoAsync(ct).ConfigureAwait(false);
+        if (!string.IsNullOrEmpty(driver)) log?.Invoke($"NVIDIA: {gpuName}, драйвер {driver}");
 
         return new HardwareCapabilities
         {
@@ -145,6 +164,7 @@ public sealed class HardwareDetector
             HasFilter_Zscale = filters.StdOut.Contains(" zscale ", StringComparison.Ordinal),
             HasFilter_Tonemap = filters.StdOut.Contains(" tonemap ", StringComparison.Ordinal),
             GpuName = gpuName, NvidiaDriver = driver, NvencFailure = nvencFailure, NvencRequiredDriver = nvencRequired,
+            EncodersWithoutHwDecode = withoutHw,
         };
     }
 
@@ -182,7 +202,7 @@ public sealed class HardwareDetector
         var path = Path.Combine(Path.GetTempPath(), "stampcut-hwtest-" + Guid.NewGuid().ToString("N")[..8] + ".mp4");
         var args = new[]
         {
-            "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=30", "-t", "0.5",
+            "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=30", "-t", "0.5",
             "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", path
         };
         try
@@ -207,14 +227,17 @@ public sealed class HardwareDetector
         catch { return false; }
     }
 
-    private async Task<(bool Ok, string Why)> TestEncoderAsync(string encoder, CancellationToken ct)
+    private async Task<(bool Ok, string Why)> TestEncoderAsync(string encoder, string? sample, string hwaccel, CancellationToken ct)
     {
-        // кадр как в реальной работе: 1280x720 yuv420p, чтобы не упереться в минимальные размеры кодера
-        var args = new[]
+        // та же связка, что при экспорте: декодирование (аппаратное или нет) → фильтр → nv12 → кодер
+        var args = new List<string> { "-hide_banner", "-loglevel", "error" };
+        if (sample is not null)
         {
-            "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=30", "-t", "0.3",
-            "-pix_fmt", "yuv420p", "-c:v", encoder, "-f", "null", "-"
-        };
+            if (hwaccel != "") args.AddRange(new[] { "-hwaccel", hwaccel });
+            args.AddRange(new[] { "-i", sample, "-vf", "scale=1280:720,format=nv12" });
+        }
+        else args.AddRange(new[] { "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=30", "-t", "0.3", "-pix_fmt", "nv12" });
+        args.AddRange(new[] { "-c:v", encoder, "-f", "null", "-" });
         try
         {
             var r = await ProcessRunner.RunAsync(_paths.Ffmpeg, args, ct, TimeSpan.FromSeconds(30)).ConfigureAwait(false);

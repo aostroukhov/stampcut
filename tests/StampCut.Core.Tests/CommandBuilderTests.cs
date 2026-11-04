@@ -215,6 +215,7 @@ public class CommandBuilderTests
         Assert.Contains("-hwaccel d3d11va -i C:/v/a.mp4", cmd);
         Assert.Contains("-c:v h264_nvenc -preset p4 -tune hq -rc vbr -cq 18 -b:v 0", cmd);
         Assert.Contains("-maxrate 9200k", cmd);
+        Assert.Contains("format=nv12[vout]", cmd); // NVENC через устройство D3D11 принимает только NV12
     }
 
     [Fact]

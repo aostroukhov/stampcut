@@ -192,7 +192,7 @@ public static class Program
             {
                 var caps = await new HardwareDetector(paths).DetectAsync();
                 encoder = caps.Resolve(encoder == HardwareEncoder.Auto ? preset.HardwareEncoder : encoder);
-                hwAccel = hwDecode ? caps.PreferredHwAccel : "";
+                hwAccel = hwDecode ? caps.HwAccelFor(encoder) : "";
                 Console.Error.WriteLine($"Кодер: {HardwareDetector.DisplayName(encoder)}; декодирование: {(hwAccel == "" ? "CPU" : hwAccel)}");
             }
         }

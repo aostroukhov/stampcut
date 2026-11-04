@@ -16,6 +16,8 @@ public sealed class AppServices
     public Task HardwareReady { get; private set; } = Task.CompletedTask;
 
     public event Action? HardwareDetected;
+    /// <summary>Поднимать при изменении логики проверки GPU, чтобы кэш в настройках пересчитался.</summary>
+    private const int DetectorVersion = 2;
     /// <summary>Рекомендация по драйверу (из свежей проверки или из кэша).</summary>
     public string CachedRecommendation { get; private set; } = "";
 
@@ -46,7 +48,7 @@ public sealed class AppServices
                 var detector = new HardwareDetector(Ffmpeg);
                 var version = await detector.VersionAsync();
                 var cache = Settings.Hardware;
-                if (!force && cache is not null && cache.FfmpegVersion == version && (DateTime.UtcNow - cache.DetectedAtUtc) < TimeSpan.FromDays(30))
+                if (!force && cache is not null && cache.DetectorVersion == DetectorVersion && cache.FfmpegVersion == version && (DateTime.UtcNow - cache.DetectedAtUtc) < TimeSpan.FromDays(30))
                 {
                     Hardware = new HardwareCapabilities
                     {
@@ -55,6 +57,7 @@ public sealed class AppServices
                         HasFilter_Tonemap = true, HasFilter_Zscale = true,
                         GpuName = cache.GpuName, NvidiaDriver = cache.NvidiaDriver,
                         NvencFailure = string.IsNullOrEmpty(cache.Recommendation) ? "" : "см. кэш",
+                        EncodersWithoutHwDecode = cache.EncodersWithoutHwDecode.ToList(),
                     };
                     CachedRecommendation = cache.Recommendation;
                 }
@@ -63,8 +66,9 @@ public sealed class AppServices
                     Hardware = await detector.DetectAsync(default, Logger.Info);
                     Settings.Hardware = new HardwareCache
                     {
-                        FfmpegVersion = version, Encoders = Hardware.Encoders.ToList(), HwAccel = Hardware.PreferredHwAccel, DetectedAtUtc = DateTime.UtcNow,
+                        DetectorVersion = DetectorVersion, FfmpegVersion = version, Encoders = Hardware.Encoders.ToList(), HwAccel = Hardware.PreferredHwAccel, DetectedAtUtc = DateTime.UtcNow,
                         Recommendation = Hardware.Recommendation, GpuName = Hardware.GpuName, NvidiaDriver = Hardware.NvidiaDriver,
+                        EncodersWithoutHwDecode = Hardware.EncodersWithoutHwDecode.ToList(),
                     };
                     CachedRecommendation = Hardware.Recommendation;
                     // сохранение — в обработчике HardwareDetected на UI-потоке: настройки правятся только там
@@ -87,6 +91,8 @@ public sealed class AppServices
     }
 
     public string ResolveHwAccel() => Settings.HardwareDecode ? Hardware?.PreferredHwAccel ?? "" : "";
+    /// <summary>Аппаратное декодирование для конкретного кодера: пусто, если их связка не работает.</summary>
+    public string ResolveHwAccel(HardwareEncoder encoder) => Settings.HardwareDecode ? Hardware?.HwAccelFor(encoder) ?? "" : "";
 
     public string HardwareSummary()
     {
