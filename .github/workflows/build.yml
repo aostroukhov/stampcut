@@ -6,6 +6,14 @@ on:
     tags: [ 'v*' ]
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_version:
+        description: "Опубликовать релиз с этой версией (например 0.1.0). Пусто — только сборка."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
 
 jobs:
   windows:
@@ -83,12 +91,24 @@ jobs:
             dist/StampCut-Setup-*.exe
           if-no-files-found: error
 
-      - name: Release (on tag)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Release tag
+        id: rel
+        shell: pwsh
+        run: |
+          $tag = ""
+          if ("${{ github.ref }}".StartsWith("refs/tags/v")) { $tag = "${{ github.ref_name }}" }
+          elseif ("${{ github.event.inputs.release_version }}" -ne "") { $tag = "v${{ github.event.inputs.release_version }}" }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          if ($tag -ne "" -and -not (Test-Path "docs/releases/$tag.md")) { "## StampCut $tag" | Set-Content "docs/releases/$tag.md" }
+
+      - name: Release (tag push or manual run with version)
+        if: steps.rel.outputs.tag != ''
         uses: softprops/action-gh-release@v2
         with:
-          name: StampCut ${{ github.ref_name }}
-          body_path: docs/releases/${{ github.ref_name }}.md
+          tag_name: ${{ steps.rel.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: StampCut ${{ steps.rel.outputs.tag }}
+          body_path: docs/releases/${{ steps.rel.outputs.tag }}.md
           files: |
             dist/StampCut-portable-win-x64.zip
             dist/StampCut-Setup-*.exe
