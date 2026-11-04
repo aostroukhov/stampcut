@@ -149,6 +149,7 @@ public sealed partial class MainWindow
 
     private void AddOverlayFromPreset(OverlaySettings? preset)
     {
+        Dispatcher.BeginInvoke(() => { _syncing = true; _overlayPresetCombo.SelectedItem = null; _syncing = false; });
         if (_overlays.Count >= 3) { ShowInfo("Не больше трёх оверлеев.", InfoKind.Warning); return; }
         var s = preset?.Clone() ?? new OverlaySettings { Name = "Оверлей" };
         s.Id = Guid.NewGuid().ToString("N");
@@ -161,8 +162,6 @@ public sealed partial class MainWindow
         _preview.SelectedOverlay = s;
         SyncOverlayPanel();
         _preview.Refresh();
-        // снять выбор в списке пресетов, чтобы тот же пресет можно было применить ещё раз
-        Dispatcher.BeginInvoke(() => { _syncing = true; _overlayPresetCombo.SelectedItem = null; _syncing = false; });
         if (item.ResolvedPath is null) BrowseOverlayFile();
     }
 
@@ -195,7 +194,7 @@ public sealed partial class MainWindow
         try
         {
             var bmp = new BitmapImage();
-            bmp.BeginInit(); bmp.CacheOption = BitmapCacheOption.OnLoad; bmp.UriSource = new Uri(item.ResolvedPath); bmp.EndInit(); bmp.Freeze();
+            bmp.BeginInit(); bmp.CacheOption = BitmapCacheOption.OnLoad; bmp.UriSource = Ui.FileUri(item.ResolvedPath); bmp.EndInit(); bmp.Freeze();
             item.Image = bmp;
             if (!ImageInfo.TryReadPngSize(item.ResolvedPath, out var w, out var h)) { w = bmp.PixelWidth; h = bmp.PixelHeight; }
             item.PngWidth = w; item.PngHeight = h;
@@ -231,6 +230,20 @@ public sealed partial class MainWindow
             try { files = Directory.EnumerateFiles(dir, "*.png"); } catch { continue; }
             foreach (var f in files) if (seen.Add(Path.GetFileName(f))) yield return f;
         }
+    }
+
+    /// <summary>Во время перетаскивания: только числа, без перестроения списков и чтения папок.</summary>
+    private void SyncOverlayNumbers()
+    {
+        var o = _selectedOverlay;
+        if (o is null) return;
+        _syncing = true;
+        try
+        {
+            _anchorPicker.Set(o.Anchor);
+            Ui.SetNumber(_offsetX, o.OffsetX); Ui.SetNumber(_offsetY, o.OffsetY); Ui.SetNumber(_widthBox, o.Width);
+        }
+        finally { _syncing = false; }
     }
 
     private void SyncOverlayPanel()

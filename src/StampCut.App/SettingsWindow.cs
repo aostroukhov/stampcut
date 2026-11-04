@@ -23,20 +23,20 @@ public sealed class SettingsWindow : Window
         var st = s.Settings;
 
         // экспорт
-        var rbNext = new RadioButton { Content = "рядом с исходником", IsChecked = st.OutputLocation == OutputLocation.NextToSource, Margin = new Thickness(0, 2, 0, 2) };
-        var rbLast = new RadioButton { Content = "в последнюю использованную папку", IsChecked = st.OutputLocation == OutputLocation.LastUsed, Margin = new Thickness(0, 2, 0, 2) };
-        var rbFixed = new RadioButton { Content = "всегда в папку:", IsChecked = st.OutputLocation == OutputLocation.Fixed, Margin = new Thickness(0, 2, 0, 2) };
+        var rbNext = new RadioButton { GroupName = "outloc", Content = "рядом с исходником", IsChecked = st.OutputLocation == OutputLocation.NextToSource, Margin = new Thickness(0, 2, 0, 2) };
+        var rbLast = new RadioButton { GroupName = "outloc", Content = "в последнюю использованную папку", IsChecked = st.OutputLocation == OutputLocation.LastUsed, Margin = new Thickness(0, 2, 0, 2) };
+        var rbFixed = new RadioButton { GroupName = "outloc", Content = "всегда в папку:", IsChecked = st.OutputLocation == OutputLocation.Fixed, Margin = new Thickness(0, 2, 0, 2) };
         var fixedDir = new TextBox { Text = st.OutputDir ?? "", Width = 330, Padding = new Thickness(4, 3, 4, 3) };
         var pattern = new TextBox { Text = st.FileNamePattern, Width = 200, Padding = new Thickness(4, 3, 4, 3) };
-        var openAfter = Ui.Check("После экспорта показать файл в проводнике", st.OpenFolderAfterExport, v => st.OpenFolderAfterExport = v);
+        var openAfter = Ui.Check("После экспорта показать файл в проводнике", st.OpenFolderAfterExport, _ => { });
 
         // GPU
         var encoders = new[] { HardwareEncoder.Auto, HardwareEncoder.None, HardwareEncoder.Nvenc, HardwareEncoder.Qsv, HardwareEncoder.Amf, HardwareEncoder.MediaFoundation };
         var encCombo = new ComboBox { Width = 220 };
         foreach (var e in encoders) encCombo.Items.Add(HardwareDetector.DisplayName(e));
         encCombo.SelectedIndex = Array.IndexOf(encoders, st.Encoder);
-        var hwDecode = Ui.Check("Аппаратное декодирование (D3D11VA)", st.HardwareDecode, v => st.HardwareDecode = v);
-        var alwaysProxy = Ui.Check("Всегда готовить прокси для просмотра (если видео не играет)", st.AlwaysUseProxy, v => st.AlwaysUseProxy = v);
+        var hwDecode = Ui.Check("Аппаратное декодирование (D3D11VA)", st.HardwareDecode, _ => { });
+        var alwaysProxy = Ui.Check("Всегда готовить прокси для просмотра (если видео не играет)", st.AlwaysUseProxy, _ => { });
         var hwInfo = Ui.Label(s.Hardware is null ? "GPU ещё проверяется…" : $"Найдено: {(s.Hardware.Encoders.Count == 0 ? "только CPU" : string.Join(", ", s.Hardware.Encoders.Select(HardwareDetector.DisplayName)))}; декодирование: {(s.Hardware.PreferredHwAccel == "" ? "CPU" : s.Hardware.PreferredHwAccel)}", muted: true, size: 11);
 
         // библиотека и ffmpeg
@@ -49,6 +49,9 @@ public sealed class SettingsWindow : Window
             st.OutputDir = string.IsNullOrWhiteSpace(fixedDir.Text) ? null : fixedDir.Text.Trim();
             st.FileNamePattern = string.IsNullOrWhiteSpace(pattern.Text) ? "{name}{suffix}" : pattern.Text.Trim();
             st.Encoder = encoders[Math.Max(0, encCombo.SelectedIndex)];
+            st.OpenFolderAfterExport = openAfter.IsChecked == true;
+            st.HardwareDecode = hwDecode.IsChecked == true;
+            st.AlwaysUseProxy = alwaysProxy.IsChecked == true;
             st.LibraryDir = string.IsNullOrWhiteSpace(libDir.Text) ? null : libDir.Text.Trim();
             st.FfmpegDir = string.IsNullOrWhiteSpace(ffDir.Text) ? null : ffDir.Text.Trim();
             DialogResult = true; Close();

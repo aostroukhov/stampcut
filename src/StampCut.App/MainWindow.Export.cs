@@ -20,18 +20,8 @@ public sealed partial class MainWindow
 
     private UIElement BuildExportBlock()
     {
-        _exportPresetCombo = Ui.Combo(_exportPresets, p => p.Name, _preset, p =>
-        {
-            _preset = p;
-            _s.Settings.LastExportPresetId = p.Id;
-            _s.Settings.Save();
-            UpdateOutputGeometry();
-            UpdateExportInfo();
-            _timeline.SnapToKeyframes = p.StreamCopy;
-            if (p.StreamCopy && _current is not null) _ = LoadKeyframesAsync(_current);
-            _timeline.InvalidateVisual();
-        }, width: 250);
-        _exportButton = Ui.Button("Экспорт", () => _ = ExportAsync(), primary: true, tooltip: "Экспортировать (Ctrl+E)", minWidth: 120);
+        _exportPresetCombo = Ui.Combo(_exportPresets, p => p.Name, _preset, OnExportPresetSelected, width: 250);
+        _exportButton = Ui.Button("Экспорт", () => Fire(ExportAsync()), primary: true, tooltip: "Экспортировать (Ctrl+E)", minWidth: 120);
         _exportButton.FontSize = 14; _exportButton.Padding = new Thickness(16, 8, 16, 8);
         var openFolder = Ui.SmallButton("Открыть папку", OpenLastFolder, "Открыть папку с результатом");
         var col = Ui.Column(
@@ -45,13 +35,25 @@ public sealed partial class MainWindow
         return Ui.Card(col);
     }
 
+    private void OnExportPresetSelected(ExportPreset p)
+    {
+        _preset = p;
+        _s.Settings.LastExportPresetId = p.Id;
+        try { _s.Settings.Save(); } catch (Exception ex) { Logger.Warn("Настройки: " + ex.Message); }
+        UpdateOutputGeometry();
+        UpdateExportInfo();
+        _timeline.SnapToKeyframes = p.StreamCopy;
+        if (p.StreamCopy && _current is not null) Fire(LoadKeyframesAsync(_current));
+        _timeline.InvalidateVisual();
+    }
+
     private void RefreshPresetCombos()
     {
         var parent = _exportPresetCombo.Parent as Panel;
         if (parent is null) return;
         int idx = parent.Children.IndexOf(_exportPresetCombo);
         parent.Children.RemoveAt(idx);
-        _exportPresetCombo = Ui.Combo(_exportPresets, p => p.Name, _preset, p => { _preset = p; _s.Settings.LastExportPresetId = p.Id; UpdateOutputGeometry(); UpdateExportInfo(); }, width: 250);
+        _exportPresetCombo = Ui.Combo(_exportPresets, p => p.Name, _preset, OnExportPresetSelected, width: 250);
         parent.Children.Insert(idx, _exportPresetCombo);
         RefreshOverlayPresetCombo();
         UpdateExportInfo();
@@ -101,8 +103,25 @@ public sealed partial class MainWindow
     private async Task ExportAsync()
     {
         if (_exportCts is not null || _clips.Count == 0) return;
+        _exportCts = new CancellationTokenSource(); // защита от повторного запуска ставится до первого await
+        _exportButton.IsEnabled = false;
         HideInfo();
         Pause();
+        try
+        {
+            await ExportCoreAsync(_exportCts.Token);
+        }
+        finally
+        {
+            _exportCts = null;
+            _progress.Visibility = Visibility.Collapsed; _progressText.Text = ""; _cancelButton.Visibility = Visibility.Collapsed;
+            _exportButton.IsEnabled = true;
+            UpdateExportInfo();
+        }
+    }
+
+    private async Task ExportCoreAsync(CancellationToken ct)
+    {
 
         // оверлеи с файлами
         var resolved = new List<ResolvedOverlay>();
@@ -125,8 +144,6 @@ public sealed partial class MainWindow
         var errors = FFmpegCommandBuilder.Validate(job);
         if (errors.Count > 0) { ShowInfo(string.Join(" ", errors), InfoKind.Error); _statusInfo.Text = ""; return; }
 
-        _exportCts = new CancellationTokenSource();
-        _exportButton.IsEnabled = false;
         _progress.Visibility = Visibility.Visible; _progress.Value = 0;
         _cancelButton.Visibility = Visibility.Visible;
         _statusInfo.Text = $"Экспорт: {Path.GetFileName(outputPath)} · {HardwareDetector.DisplayName(encoder)}";
@@ -140,17 +157,13 @@ public sealed partial class MainWindow
         try
         {
             var exporter = new Exporter(_s.Ffmpeg);
-            outcome = await exporter.ExportAsync(job, progress, _exportCts.Token, Logger.Info);
+            outcome = await exporter.ExportAsync(job, progress, ct, Logger.Info);
         }
         catch (Exception ex)
         {
             Logger.Error("Экспорт", ex);
             outcome = new ExportOutcome(false, null, ex.Message, sw.Elapsed, "");
         }
-        _exportCts = null;
-        _progress.Visibility = Visibility.Collapsed; _progressText.Text = ""; _cancelButton.Visibility = Visibility.Collapsed;
-        _exportButton.IsEnabled = true;
-
         if (outcome.Success && outcome.OutputPath is not null)
         {
             _lastExportedFile = outcome.OutputPath;
@@ -171,7 +184,6 @@ public sealed partial class MainWindow
                 ("Скопировать команду ffmpeg", () => { try { Clipboard.SetText(outcome.CommandLine); } catch { } }),
                 ("Открыть журнал", () => TryStart(Logger.CurrentFile)));
         }
-        UpdateExportInfo();
     }
 
     private void CancelExport() => _exportCts?.Cancel();

@@ -63,7 +63,7 @@ public sealed partial class MainWindow : Window
         WireEvents();
         _timeline.SnapToKeyframes = _preset.StreamCopy;
 
-        _s.HardwareDetected += () => Dispatcher.Invoke(() => _statusHw.Text = _s.HardwareSummary());
+        _s.HardwareDetected += () => Dispatcher.Invoke(() => { _statusHw.Text = _s.HardwareSummary(); try { _s.Settings.Save(); } catch (Exception ex) { Logger.Warn("Настройки: " + ex.Message); } });
         _statusHw.Text = _s.HardwareSummary();
         _s.StartHardwareDetection();
         if (!_s.Ffmpeg.IsResolved) ShowInfo("FFmpeg не найден. Положите ffmpeg.exe и ffprobe.exe в папку tools\\ffmpeg рядом с программой или укажите путь в настройках.", InfoKind.Error);
@@ -165,14 +165,15 @@ public sealed partial class MainWindow : Window
         _preview.Player.MediaOpened += (_, _) => OnMediaOpened();
         _preview.Player.MediaFailed += (_, e) => OnMediaFailed(e.ErrorException);
         _preview.Player.MediaEnded += (_, _) => { Pause(); };
-        _preview.OverlayChanged += _ => { SyncOverlayPanel(); };
+        _preview.OverlayChanged += _ => { SyncOverlayNumbers(); };
         _preview.OverlaySelected += o => { _selectedOverlay = o; SyncOverlayPanel(); };
-        _preview.CropChanged += () => { SyncCropPanel(); UpdateOutputGeometry(); };
+        _preview.CropChanged += () => { SyncCropPanel(); UpdateOutputGeometry(rebuild: false); };
         _preview.RedactionChanged += _ => SyncRedactPanel();
         _preview.RedactionSelected += r => { _selectedRedaction = r; SyncRedactPanel(); };
         _timeline.SeekRequested += Seek;
-        _timeline.InPointChanged += t => { if (_current is null) return; _current.InSec = t; AfterTrimChanged(); };
-        _timeline.OutPointChanged += t => { if (_current is null) return; _current.OutSec = t; AfterTrimChanged(); };
+        _timeline.InPointChanged += t => { if (_current is null) return; _current.InSec = t; AfterTrimChanged(light: true); };
+        _timeline.OutPointChanged += t => { if (_current is null) return; _current.OutSec = t; AfterTrimChanged(light: true); };
+        _timeline.DragCompleted += () => AfterTrimChanged();
 
         DragEventHandler dragCheck = (_, e) => { e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None; e.Handled = true; };
         DragEnter += dragCheck;
@@ -183,8 +184,8 @@ public sealed partial class MainWindow : Window
             {
                 var videos = files.Where(IsVideoFile).ToList();
                 var pngs = files.Where(f => f.EndsWith(".png", StringComparison.OrdinalIgnoreCase)).ToList();
-                if (videos.Count > 0) await AddFilesAsync(videos, replace: _clips.Count == 0);
                 foreach (var png in pngs) AddOverlayFromFile(png);
+                if (videos.Count > 0) await AddFilesAsync(videos, replace: _clips.Count == 0);
             }
         };
         PreviewKeyDown += OnKeyDown;
@@ -203,7 +204,7 @@ public sealed partial class MainWindow : Window
             case Key.I: SetInHere(); break;
             case Key.O when !ctrl: SetOutHere(); break;
             case Key.O when ctrl: OpenFiles(replace: true); break;
-            case Key.E when ctrl: _ = ExportAsync(); break;
+            case Key.E when ctrl: Fire(ExportAsync()); break;
             case Key.Left: if (shift) Seek(Position - 1); else StepFrame(-1); break;
             case Key.Right: if (shift) Seek(Position + 1); else StepFrame(1); break;
             case Key.Home: Seek(_current?.InSec ?? 0); break;
@@ -215,6 +216,18 @@ public sealed partial class MainWindow : Window
             default: return;
         }
         e.Handled = true;
+    }
+
+    /// <summary>Запуск задачи «в фоне» так, чтобы её ошибка попала в журнал и в полосу уведомлений, а не потерялась.</summary>
+    private void Fire(Task task)
+    {
+        task.ContinueWith(t =>
+        {
+            var ex = t.Exception?.GetBaseException();
+            if (ex is OperationCanceledException) return;
+            Logger.Error("Фоновая операция", ex);
+            Dispatcher.BeginInvoke(() => ShowInfo("Ошибка: " + ex?.Message, InfoKind.Error, ("Открыть журнал", () => TryStart(Logger.CurrentFile))));
+        }, TaskContinuationOptions.OnlyOnFaulted);
     }
 
     // ------------------------------------------------------------------ информационная полоса

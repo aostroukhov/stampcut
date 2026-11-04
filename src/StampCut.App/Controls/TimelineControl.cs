@@ -22,6 +22,8 @@ public sealed class TimelineControl : FrameworkElement
     public event Action<double>? SeekRequested;
     public event Action<double>? InPointChanged;
     public event Action<double>? OutPointChanged;
+    /// <summary>Перетаскивание маркера входа/выхода закончено.</summary>
+    public event Action? DragCompleted;
 
     private enum Drag { None, Seek, In, Out }
     private Drag _drag;
@@ -127,8 +129,10 @@ public sealed class TimelineControl : FrameworkElement
 
     protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e)
     {
+        bool wasMarker = _drag is Drag.In or Drag.Out;
         _drag = Drag.None;
         ReleaseMouseCapture();
+        if (wasMarker) DragCompleted?.Invoke();
     }
 
     public double Snap(double t)

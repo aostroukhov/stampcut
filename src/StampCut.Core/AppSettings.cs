@@ -66,11 +66,18 @@ public sealed class AppSettings
         return new AppSettings();
     }
 
+    private static readonly object SaveGate = new();
+
     public void Save(string? file = null)
     {
         file ??= AppPaths.SettingsFile;
-        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
-        File.WriteAllText(file, JsonSerializer.Serialize(this, JsonOptions));
+        lock (SaveGate)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+            var tmp = file + ".tmp";
+            File.WriteAllText(tmp, JsonSerializer.Serialize(this, JsonOptions));
+            File.Move(tmp, file, overwrite: true);
+        }
     }
 }
 

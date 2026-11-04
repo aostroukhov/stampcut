@@ -8,7 +8,23 @@ namespace StampCut.App.Services;
 public sealed class ProxyService
 {
     private readonly AppServices _s;
-    private readonly Dictionary<string, Task<string>> _inFlight = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, InFlight> _inFlight = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Одна сборка прокси на файл: ждать могут несколько вызовов, отмена — когда отказались все.</summary>
+    private sealed class InFlight
+    {
+        public Task<string> Task = null!;
+        public readonly CancellationTokenSource Cts = new();
+        public readonly MultiProgress Progress = new();
+        public int Waiters;
+    }
+
+    private sealed class MultiProgress : IProgress<ExportProgress>
+    {
+        private readonly List<IProgress<ExportProgress>> _targets = new();
+        public void Add(IProgress<ExportProgress> p) { lock (_targets) _targets.Add(p); }
+        public void Report(ExportProgress value) { IProgress<ExportProgress>[] copy; lock (_targets) copy = _targets.ToArray(); foreach (var t in copy) t.Report(value); }
+    }
 
     public ProxyService(AppServices s) => _s = s;
 
@@ -21,17 +37,40 @@ public sealed class ProxyService
     public Task<string> EnsureProxyAsync(MediaInfo media, IProgress<ExportProgress>? progress, CancellationToken ct)
     {
         var path = ProxyBuilder.ProxyPath(media, AppPaths.ProxyDir);
+        InFlight f;
         lock (_inFlight)
         {
-            if (_inFlight.TryGetValue(path, out var running)) return running;
-            var task = BuildAsync(media, path, progress, ct);
-            _inFlight[path] = task;
-            _ = task.ContinueWith(_ => { lock (_inFlight) _inFlight.Remove(path); });
-            return task;
+            if (!_inFlight.TryGetValue(path, out f!))
+            {
+                f = new InFlight();
+                var local = f;
+                f.Task = BuildAsync(media, path, local.Progress, local.Cts.Token);
+                _inFlight[path] = f;
+                _ = f.Task.ContinueWith(_ => { lock (_inFlight) if (_inFlight.TryGetValue(path, out var cur) && ReferenceEquals(cur, local)) _inFlight.Remove(path); });
+            }
+            f.Waiters++;
+            if (progress is not null) f.Progress.Add(progress);
+        }
+        return WaitAsync(f, ct);
+    }
+
+    private async Task<string> WaitAsync(InFlight f, CancellationToken ct)
+    {
+        using var reg = ct.Register(() =>
+        {
+            lock (_inFlight) { if (--f.Waiters <= 0) f.Cts.Cancel(); }
+        });
+        try
+        {
+            return await f.Task.WaitAsync(ct);
+        }
+        finally
+        {
+            if (!ct.IsCancellationRequested) lock (_inFlight) f.Waiters--;
         }
     }
 
-    private async Task<string> BuildAsync(MediaInfo media, string path, IProgress<ExportProgress>? progress, CancellationToken ct)
+    private async Task<string> BuildAsync(MediaInfo media, string path, IProgress<ExportProgress> progress, CancellationToken ct)
     {
         if (File.Exists(path) && new FileInfo(path).Length > 0) return path;
         await _s.HardwareReady;

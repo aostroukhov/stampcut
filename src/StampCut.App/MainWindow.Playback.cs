@@ -65,7 +65,7 @@ public sealed partial class MainWindow
     {
         _mediaReady = false;
         _pendingSeek = startAt;
-        _preview.Player.Source = new Uri(path);
+        _preview.Player.Source = Ui.FileUri(path);
         _preview.Player.Play(); // MediaElement открывает файл только после Play()
         _playing = true;
         _playButton.Content = "⏸";
@@ -107,10 +107,11 @@ public sealed partial class MainWindow
                         OpenInPlayer(path, clip.InSec);
                     });
                 }
+                catch (OperationCanceledException) { /* выбран другой ролик */ }
                 catch (Exception e2)
                 {
                     Logger.Error("Прокси после сбоя плеера", e2);
-                    await Dispatcher.InvokeAsync(() => _preview.ShowMessage("Не удалось открыть видео для просмотра.\n" + e2.Message));
+                    await Dispatcher.InvokeAsync(() => { if (ReferenceEquals(clip, _current)) _preview.ShowMessage("Не удалось открыть видео для просмотра.\n" + e2.Message); });
                 }
             });
         }
@@ -126,7 +127,7 @@ public sealed partial class MainWindow
             var bmp = new BitmapImage();
             bmp.BeginInit();
             bmp.CacheOption = BitmapCacheOption.OnLoad;
-            bmp.UriSource = new Uri(path);
+            bmp.UriSource = Ui.FileUri(path);
             bmp.EndInit();
             bmp.Freeze();
             if (!_mediaReady && ReferenceEquals(clip, _current)) _preview.ShowPoster(bmp);
@@ -218,13 +219,15 @@ public sealed partial class MainWindow
         AfterTrimChanged();
     }
 
-    private void AfterTrimChanged()
+    /// <summary>light = во время перетаскивания маркера: только лента и подпись, без перестроения списков.</summary>
+    private void AfterTrimChanged(bool light = false)
     {
         if (_current is null) return;
         _timeline.InPoint = _current.InSec; _timeline.OutPoint = _current.OutSec;
         _timeline.InvalidateVisual();
         bool trimmed = _current.InSec > 0.01 || _current.OutSec < _current.Media.DurationSec - 0.01;
         _fragmentText.Text = trimmed ? $"фрагмент {TimeFormat.Format(_current.InSec, false)}–{TimeFormat.Format(_current.OutSec, false)} ({TimeFormat.Format(_current.DurationSec, false)})" : "";
+        if (light) return;
         RefreshClipList();
         UpdateExportInfo();
     }

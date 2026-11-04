@@ -23,6 +23,9 @@ public static class Ui
         foreach (var b in new[] { Accent, AccentDark, PanelBg, Border, Muted, PreviewBg, Danger, Warning, Success }) b.Freeze();
     }
 
+    /// <summary>file:-URI для пути с «#» и «%»: new Uri(path) считает «#» началом фрагмента и теряет хвост имени.</summary>
+    public static Uri FileUri(string path) => new(path.Replace("%", "%25").Replace("#", "%23"));
+
     public static Button Button(string text, Action onClick, bool primary = false, string? tooltip = null, double minWidth = 0)
     {
         var b = new Button

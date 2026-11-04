@@ -32,7 +32,7 @@ public sealed partial class MainWindow
 
         _clipList.SelectionChanged += (_, _) =>
         {
-            if (_clipList.SelectedItem is ListBoxItem { Tag: Clip c } && !ReferenceEquals(c, _current)) _ = SelectClipAsync(c);
+            if (_clipList.SelectedItem is ListBoxItem { Tag: Clip c } && !ReferenceEquals(c, _current)) SelectClip(c);
         };
         panel.Children.Add(new Border { Child = _clipList, Background = Brushes.White, BorderBrush = Ui.Border, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6) });
         return panel;
@@ -64,7 +64,7 @@ public sealed partial class MainWindow
         };
         var dir = _s.Settings.LastOpenDir;
         if (dir is not null) dlg.InitialDirectory = dir;
-        if (dlg.ShowDialog(this) == true) _ = AddFilesAsync(dlg.FileNames, replace);
+        if (dlg.ShowDialog(this) == true) Fire(AddFilesAsync(dlg.FileNames, replace));
     }
 
     private void ShowRecentMenu(Button anchor)
@@ -77,7 +77,7 @@ public sealed partial class MainWindow
         foreach (var f in files)
         {
             var mi = new MenuItem { Header = Path.GetFileName(f), ToolTip = f };
-            mi.Click += (_, _) => _ = AddFilesAsync(new[] { f }, replace: _clips.Count == 0);
+            mi.Click += (_, _) => Fire(AddFilesAsync(new[] { f }, replace: _clips.Count == 0));
             menu.Items.Add(mi);
         }
         if (dirs.Count > 0) { menu.Items.Add(new Separator()); menu.Items.Add(new MenuItem { Header = "Папки", IsEnabled = false, FontWeight = FontWeights.Bold }); }
@@ -87,7 +87,7 @@ public sealed partial class MainWindow
             mi.Click += (_, _) =>
             {
                 var dlg = new OpenFileDialog { Multiselect = true, InitialDirectory = d, Filter = "Видео|*.mp4;*.mov;*.m4v;*.3gp;*.mkv;*.webm;*.avi;*.mts;*.m2ts;*.wmv;*.ts|Все файлы|*.*" };
-                if (dlg.ShowDialog(this) == true) _ = AddFilesAsync(dlg.FileNames, replace: _clips.Count == 0);
+                if (dlg.ShowDialog(this) == true) Fire(AddFilesAsync(dlg.FileNames, replace: _clips.Count == 0));
             };
             menu.Items.Add(mi);
         }
@@ -125,14 +125,15 @@ public sealed partial class MainWindow
                 ShowInfo($"{Path.GetFileName(file)}: {ex.Message}", InfoKind.Error);
             }
         }
-        _s.Settings.Save();
+        try { _s.Settings.Save(); } catch (Exception ex) { Logger.Warn("Настройки: " + ex.Message); }
         ApplyDefaultOverlayIfNeeded();
         RefreshClipList();
-        if (first is not null) await SelectClipAsync(first);
         UpdateExportInfo();
+        if (first is not null) SelectClip(first);
+        else if (_clips.Count == 0) _statusInfo.Text = "Перетащите видео в окно или нажмите «Открыть»";
     }
 
-    private async Task SelectClipAsync(Clip clip)
+    private void SelectClip(Clip clip)
     {
         _current = clip;
         _selectedRedaction = null;
@@ -145,15 +146,16 @@ public sealed partial class MainWindow
         _statusInfo.Text = clip.FileName + " · " + clip.Media.Summary();
         UpdateOutputGeometry();
         SyncCropPanel(); SyncRedactPanel(); SyncCensorPanel(); UpdateTimelineMarkers();
-        await LoadIntoPlayerAsync(clip);
-        if (_preset.StreamCopy) _ = LoadKeyframesAsync(clip);
+        Fire(LoadIntoPlayerAsync(clip)); // просмотр готовится в фоне, интерфейс не ждёт прокси
+        if (_preset.StreamCopy) Fire(LoadKeyframesAsync(clip));
     }
 
     private void SelectClipOffset(int delta)
     {
         if (_current is null || _clips.Count < 2) return;
-        int i = Math.Clamp(_clips.IndexOf(_current) + delta, 0, _clips.Count - 1);
-        _ = SelectClipAsync(_clips[i]);
+        int cur = _clips.IndexOf(_current);
+        int i = Math.Clamp(cur + delta, 0, _clips.Count - 1);
+        if (i != cur) SelectClip(_clips[i]);
     }
 
     private void MoveClip(int delta)
@@ -175,7 +177,7 @@ public sealed partial class MainWindow
         Pause();
         _current = null;
         RefreshClipList();
-        if (_clips.Count > 0) _ = SelectClipAsync(_clips[Math.Clamp(i, 0, _clips.Count - 1)]);
+        if (_clips.Count > 0) SelectClip(_clips[Math.Clamp(i, 0, _clips.Count - 1)]);
         else
         {
             _preview.CurrentClip = null; _preview.Player.Source = null; _preview.ShowPoster(null); _preview.Refresh();
@@ -186,7 +188,7 @@ public sealed partial class MainWindow
     }
 
     /// <summary>Размер выходного кадра для превью (WYSIWYG оверлея) — тот же расчёт, что при экспорте.</summary>
-    private void UpdateOutputGeometry()
+    private void UpdateOutputGeometry(bool rebuild = true)
     {
         if (_clips.Count == 0 || _current is null) return;
         var job = new ExportJob { Clips = _clips, Preset = _preset, OutputPath = "x", Encoder = HardwareEncoder.None };
@@ -194,7 +196,7 @@ public sealed partial class MainWindow
         _preview.OutputWidth = w; _preview.OutputHeight = h;
         bool isFirst = ReferenceEquals(_clips[0], _current);
         _preview.Fit = _preset.StreamCopy ? FitMode.Keep : (_preset.HasFixedSize ? _preset.Fit : (isFirst ? FitMode.Keep : FitMode.PadBlack));
-        _preview.Refresh();
+        if (rebuild) _preview.Refresh(); else _preview.Layout(); // во время перетаскивания слой перестраивать нельзя
     }
 
     private async Task LoadKeyframesAsync(Clip clip)

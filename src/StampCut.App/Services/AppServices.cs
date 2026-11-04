@@ -60,7 +60,7 @@ public sealed class AppServices
                     {
                         FfmpegVersion = version, Encoders = Hardware.Encoders.ToList(), HwAccel = Hardware.PreferredHwAccel, DetectedAtUtc = DateTime.UtcNow,
                     };
-                    Settings.Save();
+                    // сохранение — в обработчике HardwareDetected на UI-потоке: настройки правятся только там
                 }
                 Logger.Info($"GPU: кодеры [{string.Join(", ", Hardware.Encoders)}], декодирование {Hardware.PreferredHwAccel}");
             }
