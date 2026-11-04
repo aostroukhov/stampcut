@@ -54,7 +54,10 @@ public sealed class PreviewControl : Grid
     public FitMode Fit { get; set; } = FitMode.Keep;
     /// <summary>Фиксированное соотношение сторон кропа (w/h) или null — свободно.</summary>
     public double? CropAspect { get; set; }
+    /// <summary>Позиция в секундах исходника (для интервалов ретуши).</summary>
     public double CurrentTimeSec { get; set; }
+    /// <summary>Позиция на выходной ленте (для интервалов показа оверлея).</summary>
+    public double OutputTimeSec { get; set; }
 
     public event Action<OverlaySettings>? OverlayChanged;
     public event Action<OverlaySettings>? OverlaySelected;
@@ -212,7 +215,7 @@ public sealed class PreviewControl : Grid
                 var r = RectOut();
                 var px = new Rect(frame.X + r.X * k, frame.Y + r.Y * k, r.Width * k, r.Height * k);
                 var sc = ToScreen(px);
-                visibleNow = s.FromSec is null && s.ToSec is null || (CurrentTimeSec >= (s.FromSec ?? 0) && CurrentTimeSec <= (s.ToSec ?? double.MaxValue));
+                visibleNow = s.FromSec is null && s.ToSec is null || (OutputTimeSec >= (s.FromSec ?? 0) && OutputTimeSec <= (s.ToSec ?? double.MaxValue));
                 img.Opacity = s.Opacity * (visibleNow ? 1 : 0.25);
                 Place(img, sc.X, sc.Y, sc.Width, sc.Height);
                 Place(move, sc.X, sc.Y, sc.Width, sc.Height);

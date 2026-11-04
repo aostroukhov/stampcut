@@ -35,7 +35,7 @@ public sealed class TimelineControl : FrameworkElement
 
     public TimelineControl()
     {
-        Height = 56;
+        Height = 64;
         Focusable = false;
         Cursor = Cursors.Hand;
         foreach (var b in new[] { Track, Selected, Playhead, Marker, KeyframeBrush }) b.Freeze();
@@ -79,8 +79,8 @@ public sealed class TimelineControl : FrameworkElement
 
         // подписи времени
         var tf = new Typeface("Segoe UI");
-        DrawText(dc, TimeFormat.Format(0, false), Pad, h - 13, tf, HorizontalAlignment.Left);
-        DrawText(dc, TimeFormat.Format(Duration, false), Pad + W, h - 13, tf, HorizontalAlignment.Right);
+        DrawText(dc, TimeFormat.Format(0, false), Pad, h - 14, tf, HorizontalAlignment.Left);
+        DrawText(dc, TimeFormat.Format(Duration, false), Pad + W, h - 14, tf, HorizontalAlignment.Right);
     }
 
     private static void DrawMarker(DrawingContext dc, double x, double top, double h, bool isIn)

@@ -161,6 +161,8 @@ public sealed partial class MainWindow
         _preview.SelectedOverlay = s;
         SyncOverlayPanel();
         _preview.Refresh();
+        // снять выбор в списке пресетов, чтобы тот же пресет можно было применить ещё раз
+        Dispatcher.BeginInvoke(() => { _syncing = true; _overlayPresetCombo.SelectedItem = null; _syncing = false; });
         if (item.ResolvedPath is null) BrowseOverlayFile();
     }
 
@@ -325,8 +327,8 @@ public sealed partial class MainWindow
     private UIElement BuildCropSection()
     {
         _cropToggle = new ToggleButton { Content = "Изменить кроп", Padding = new Thickness(10, 4, 10, 4), Focusable = false };
-        _cropToggle.Checked += (_, _) => SetEditMode(EditMode.Crop);
-        _cropToggle.Unchecked += (_, _) => { if (_preview.Mode == EditMode.Crop) SetEditMode(EditMode.View); };
+        _cropToggle.Checked += (_, _) => { if (!_syncing) SetEditMode(EditMode.Crop); };
+        _cropToggle.Unchecked += (_, _) => { if (!_syncing && _preview.Mode == EditMode.Crop) SetEditMode(EditMode.View); };
         var aspectCombo = new ComboBox { Width = 130 };
         foreach (var (name, _) in Aspects) aspectCombo.Items.Add(name);
         aspectCombo.SelectedIndex = 0;

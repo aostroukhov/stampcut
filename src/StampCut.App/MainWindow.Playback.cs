@@ -154,6 +154,7 @@ public sealed partial class MainWindow
         _timeline.Position = pos;
         _timeline.InvalidateVisual();
         _preview.CurrentTimeSec = pos;
+        _preview.OutputTimeSec = OutputTime();
         _preview.Layout();
         _timeText.Text = $"{TimeFormat.Format(pos)} / {TimeFormat.Format(_current.Media.DurationSec)}";
     }

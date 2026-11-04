@@ -61,6 +61,7 @@ public sealed partial class MainWindow : Window
 
         Content = BuildLayout();
         WireEvents();
+        _timeline.SnapToKeyframes = _preset.StreamCopy;
 
         _s.HardwareDetected += () => Dispatcher.Invoke(() => _statusHw.Text = _s.HardwareSummary());
         _statusHw.Text = _s.HardwareSummary();
@@ -173,7 +174,9 @@ public sealed partial class MainWindow : Window
         _timeline.InPointChanged += t => { if (_current is null) return; _current.InSec = t; AfterTrimChanged(); };
         _timeline.OutPointChanged += t => { if (_current is null) return; _current.OutSec = t; AfterTrimChanged(); };
 
-        DragEnter += (_, e) => { e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None; e.Handled = true; };
+        DragEventHandler dragCheck = (_, e) => { e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None; e.Handled = true; };
+        DragEnter += dragCheck;
+        DragOver += dragCheck;
         Drop += async (_, e) =>
         {
             if (e.Data.GetData(DataFormats.FileDrop) is string[] files)
