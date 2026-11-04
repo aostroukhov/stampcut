@@ -304,6 +304,7 @@ public sealed partial class MainWindow : Window
             case Key.O when !ctrl: SetOutHere(); break;
             case Key.O when ctrl: OpenFiles(replace: true); break;
             case Key.S when ctrl: SaveProject(saveAs: shift); break;
+            case Key.N when ctrl: NewProject(); break;
             case Key.Z when ctrl && !shift: Undo(); break;
             case Key.Z when ctrl && shift: Redo(); break;
             case Key.Y when ctrl: Redo(); break;
@@ -401,6 +402,7 @@ public sealed partial class MainWindow : Window
         Item(T("Отменить") + " (Ctrl+Z)", Undo, _history.CanUndo);
         Item(T("Повторить") + " (Ctrl+Y)", Redo, _history.CanRedo);
         menu.Items.Add(new Separator());
+        Item(T("Новый проект") + " (Ctrl+N)", NewProject, _clips.Count > 0 || _overlays.Count > 0);
         Item(T("Сохранить проект") + " (Ctrl+S)", () => SaveProject(saveAs: false), _clips.Count > 0);
         Item(T("Сохранить проект как…"), () => SaveProject(saveAs: true), _clips.Count > 0);
         Item(T("Открыть проект…"), OpenProjectDialog);
@@ -497,14 +499,46 @@ public sealed partial class MainWindow : Window
         else _statusInfo.Text = $"{T("Проект открыт")}: {Path.GetFileName(path)}";
     }
 
-    /// <summary>Файлы с командной строки, из drag-and-drop и «Недавних»: проекты открываются как проекты, остальное — как видео.</summary>
-    private async Task OpenAnyAsync(IEnumerable<string> files, bool replace)
+    /// <summary>Файлы с командной строки, из drag-and-drop и «Недавних»: проекты открываются как проекты, остальное — как видео.
+    /// Если проекта ещё нет и рядом с видео лежит «имя-видео.stampcut.json» — открывается он.</summary>
+    private async Task OpenAnyAsync(IEnumerable<string> files, bool replace, bool ignoreSiblingProject = false)
     {
         var list = files.ToList();
         var project = list.FirstOrDefault(Core.Presets.ProjectStore.IsProjectFile);
         if (project is not null) { await OpenProjectAsync(project); list.Remove(project); replace = false; }
         var videos = list.Where(f => IsVideoFile(f) || IsImageFile(f) || File.Exists(f)).Where(f => !Core.Presets.ProjectStore.IsProjectFile(f)).ToList();
-        if (videos.Count > 0) await AddFilesAsync(videos, replace);
+        if (videos.Count == 0) return;
+        if (replace && !ignoreSiblingProject && _projectPath is null && videos.Count == 1)
+        {
+            var sibling = Path.Combine(Path.GetDirectoryName(videos[0]) ?? "", Path.GetFileNameWithoutExtension(videos[0]) + Core.Presets.ProjectFile.Extension);
+            if (File.Exists(sibling))
+            {
+                var video = videos[0];
+                await OpenProjectAsync(sibling);
+                ShowInfo($"{T("Рядом с видео найден проект")} {Path.GetFileName(sibling)} — {T("открыт он.")}", InfoKind.Info,
+                    (T("Открыть только видео"), () => Fire(OpenAnyAsync(new[] { video }, replace: true, ignoreSiblingProject: true))));
+                return;
+            }
+        }
+        await AddFilesAsync(videos, replace);
+    }
+
+    /// <summary>Новый проект: убрать все ролики и оверлеи, сбросить историю (с вопросом о сохранении).</summary>
+    private void NewProject()
+    {
+        if (!ConfirmDiscardChanges()) return;
+        Pause();
+        _proxyCts?.Cancel();
+        DeleteAutosave(_projectPath);
+        _clips.Clear(); _current = null; _activeSegment = null; _selectedRedaction = null;
+        _overlays.Clear(); _selectedOverlay = null;
+        _preview.Overlays.Clear(); _preview.SelectedOverlay = null;
+        _projectPath = null;
+        HideInfo();
+        RefreshClipList(); SyncOverlayPanel(); SyncRedactPanel(); SyncCensorPanel(); UpdateExportInfo();
+        ClearPreview();
+        _history.Reset(Snapshot(), saved: true);
+        SetTitle(null);
     }
 
     private void SetTitle(string? project, bool dirty = false)
