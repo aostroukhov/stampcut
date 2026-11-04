@@ -14,8 +14,8 @@ public sealed partial class MainWindow
 {
     private CancellationTokenSource? _exportCts;
     private ComboBox _exportPresetCombo = new();
-    private readonly TextBlock _exportTarget = Ui.Label("", muted: true, size: 11);
-    private readonly TextBlock _exportDetails = Ui.Label("", muted: true, size: 11);
+    private readonly TextBlock _exportTarget = Ui.Label("", muted: true, size: Ui.FontCaption);
+    private readonly TextBlock _exportDetails = Ui.Label("", muted: true, size: Ui.FontCaption);
     private Button _exportButton = new();
     private string? _lastExportedFile;
 
@@ -23,7 +23,7 @@ public sealed partial class MainWindow
     {
         _exportPresetCombo = Ui.Combo(_exportPresets, p => p.Name, _preset, OnExportPresetSelected, width: 0);
         _exportButton = Ui.Button(T("Экспорт"), () => Fire(ExportAsync()), primary: true, tooltip: T("Экспортировать (Ctrl+E)"), minWidth: 120);
-        _exportButton.FontSize = 14; _exportButton.Height = 36; _exportButton.Padding = new Thickness(18, 0, 18, 0);
+        _exportButton.Height = 36; _exportButton.Padding = new Thickness(18, 0, 18, 0);
         var openFolder = Ui.SmallButton(T("Открыть папку"), OpenLastFolder, T("Открыть папку с результатом"));
         var col = Ui.Column(
             Ui.Header(T("ЭКСПОРТ")),

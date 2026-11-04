@@ -41,6 +41,8 @@ public static class Ui
     public static void ApplyWindowTheme(Window w)
     {
         Themed(w, Control.ForegroundProperty, "TextFillColorPrimaryBrush", Brushes.Black);
+        w.FontFamily = Font;
+        w.FontSize = FontBody;
     }
 
     public static Icon? AppIcon()
@@ -79,6 +81,10 @@ public static class Ui
 
     /// <summary>Единая высота кнопок, переключателей и полей — как у элементов Windows 11.</summary>
     public const double ControlHeight = 32;
+    /// <summary>Типографика: основной текст и элементы — 14, подписи-подсказки — 12, заголовки карточек — 12 жирным.</summary>
+    public const double FontBody = 14;
+    public const double FontCaption = 12;
+    public static readonly FontFamily Font = new("Segoe UI Variable Text, Segoe UI");
 
     public static Button SmallButton(string text, Action onClick, string? tooltip = null)
     {
@@ -95,7 +101,7 @@ public static class Ui
         return t;
     }
 
-    public static TextBlock Label(string text, bool muted = false, double size = 12, FontWeight? weight = null)
+    public static TextBlock Label(string text, bool muted = false, double size = FontBody, FontWeight? weight = null)
     {
         var tb = new TextBlock { Text = text, FontSize = size, FontWeight = weight ?? FontWeights.Normal, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap };
         Themed(tb, TextBlock.ForegroundProperty, muted ? "TextFillColorSecondaryBrush" : "TextFillColorPrimaryBrush", muted ? Muted : Brushes.Black);
@@ -104,7 +110,7 @@ public static class Ui
 
     public static TextBlock Header(string text)
     {
-        var tb = new TextBlock { Text = text, FontSize = 12, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 6) };
+        var tb = new TextBlock { Text = text, FontSize = FontCaption, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 6) };
         Themed(tb, TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush", Muted);
         return tb;
     }

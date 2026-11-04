@@ -7,7 +7,7 @@ namespace StampCut.App;
 /// <summary>Маленький диалог ввода строки (имя пресета).</summary>
 public sealed class InputWindow : Window
 {
-    private readonly TextBox _box = new() { Padding = new Thickness(6, 4, 6, 4), FontSize = 13 };
+    private readonly TextBox _box = new() { Padding = new Thickness(6, 0, 6, 0), Height = Ui.ControlHeight, VerticalContentAlignment = VerticalAlignment.Center };
     public string Value => _box.Text.Trim();
 
     public InputWindow(string title, string prompt, string initial = "")

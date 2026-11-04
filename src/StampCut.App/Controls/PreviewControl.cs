@@ -278,7 +278,7 @@ public sealed class PreviewControl : Grid
                 IsHitTestVisible = false,
             };
             var border = new Rectangle { Stroke = region.Mode == RedactMode.Pixelate ? Brushes.Orange : Brushes.Yellow, StrokeThickness = 1.5, IsHitTestVisible = false, StrokeDashArray = new DoubleCollection { 3, 2 } };
-            var label = new TextBlock { Text = region.Mode == RedactMode.Pixelate ? "мозаика" : "размытие", Foreground = Brushes.White, FontSize = 10, Background = new SolidColorBrush(Color.FromArgb(120, 0, 0, 0)), Padding = new Thickness(3, 0, 3, 0), IsHitTestVisible = false };
+            var label = new TextBlock { Text = region.Mode == RedactMode.Pixelate ? Lang.T("мозаика") : Lang.T("размытие"), Foreground = Brushes.White, FontSize = Ui.FontCaption, Background = new SolidColorBrush(Color.FromArgb(120, 0, 0, 0)), Padding = new Thickness(3, 0, 3, 0), IsHitTestVisible = false };
             var move = Ui.TransparentThumb();
             var resize = Ui.Handle(11, Cursors.SizeNWSE, Brushes.Yellow);
             _layer.Children.Add(fill); _layer.Children.Add(border); _layer.Children.Add(label); _layer.Children.Add(move); _layer.Children.Add(resize);

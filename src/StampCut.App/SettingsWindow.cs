@@ -51,7 +51,7 @@ public sealed class SettingsWindow : Window
         var alwaysProxy = Ui.Check(T("Всегда готовить прокси для просмотра (если видео не играет)"), st.AlwaysUseProxy, _ => { });
         var hwInfo = Ui.Label(s.Hardware is null ? T("GPU ещё проверяется…") : $"{T("Найдено: ")}{(s.Hardware.Encoders.Count == 0 ? T("только CPU") : string.Join(", ", s.Hardware.Encoders.Select(HardwareDetector.DisplayName)))}; декодирование: {(s.Hardware.PreferredHwAccel == "" ? "CPU" : s.Hardware.PreferredHwAccel)}"
             + (string.IsNullOrEmpty(s.Hardware.NvidiaDriver) ? "" : $"\n{s.Hardware.GpuName}, {T("драйвер NVIDIA")} {s.Hardware.NvidiaDriver}")
-            + (string.IsNullOrEmpty(s.CachedRecommendation) ? "" : "\n⚠ " + s.CachedRecommendation), muted: true, size: 11);
+            + (string.IsNullOrEmpty(s.CachedRecommendation) ? "" : "\n⚠ " + s.CachedRecommendation), muted: true, size: Ui.FontCaption);
 
         var libDir = new TextBox { Text = st.LibraryDir ?? "", Width = 330, Height = Ui.ControlHeight, Padding = new Thickness(4, 0, 4, 0), VerticalContentAlignment = VerticalAlignment.Center };
         var ffDir = new TextBox { Text = st.FfmpegDir ?? "", Width = 330, Height = Ui.ControlHeight, Padding = new Thickness(4, 0, 4, 0), VerticalContentAlignment = VerticalAlignment.Center };
@@ -86,20 +86,20 @@ public sealed class SettingsWindow : Window
                     Ui.Row(Ui.Label(T("Тема:"), muted: true), themeCombo, Ui.Label(T("Язык:"), muted: true), langCombo),
                     Gap(), Ui.Header(T("КУДА СОХРАНЯТЬ")),
                     rbNext, rbLast, Ui.Row(rbFixed, fixedDir, Ui.SmallButton("…", () => PickFolder(fixedDir))),
-                    Ui.Row(Ui.Label(T("Имя файла:"), muted: true), pattern, Ui.Label("{name} {suffix} {date} {time}", muted: true, size: 11)),
+                    Ui.Row(Ui.Label(T("Имя файла:"), muted: true), pattern, Ui.Label("{name} {suffix} {date} {time}", muted: true, size: Ui.FontCaption)),
                     openAfter,
                     Gap(), Ui.Header("GPU"),
                     Ui.Row(Ui.Label(T("Кодирование:"), muted: true), encCombo, Ui.SmallButton(T("Проверить заново"), () => { RedetectRequested = true; hwInfo.Text = T("Проверка запустится после сохранения."); })),
                     hwDecode, alwaysProxy, hwInfo,
                     Gap(), Ui.Header(T("ОБЩАЯ БИБЛИОТЕКА РЕДАКЦИИ")),
-                    Ui.Label(T("Папка (можно сетевую или в облаке) с подпапками overlays и presets — у всех сотрудников одинаковые оверлеи и пресеты."), muted: true, size: 11),
+                    Ui.Label(T("Папка (можно сетевую или в облаке) с подпапками overlays и presets — у всех сотрудников одинаковые оверлеи и пресеты."), muted: true, size: Ui.FontCaption),
                     Ui.Row(libDir, Ui.SmallButton("…", () => PickFolder(libDir))),
                     Gap(), Ui.Header("FFMPEG"),
-                    Ui.Label($"{T("Сейчас: ")}{s.Ffmpeg.Ffmpeg}", muted: true, size: 11),
+                    Ui.Label($"{T("Сейчас: ")}{s.Ffmpeg.Ffmpeg}", muted: true, size: Ui.FontCaption),
                     Ui.Row(ffDir, Ui.SmallButton("…", () => PickFolder(ffDir))),
                     Ui.Row(Ui.SmallButton(T("Открыть папку журналов"), () => { try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(AppPaths.LogDir) { UseShellExecute = true }); } catch { } }),
                            Ui.SmallButton(T("Открыть папку пресетов"), () => { try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(AppPaths.PresetsDir) { UseShellExecute = true }); } catch { } })),
-                    Ui.Label($"StampCut {MainWindow.AppVersion}", muted: true, size: 11),
+                    Ui.Label($"StampCut {MainWindow.AppVersion}", muted: true, size: Ui.FontCaption),
                     new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 16, 0, 0), Children = { ok, cancel } },
                 },
             },

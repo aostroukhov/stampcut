@@ -26,13 +26,13 @@ public sealed partial class MainWindow
     private TextBox _fadeIn = new(), _fadeOut = new(), _ovFrom = new(), _ovTo = new();
     private Slider _opacitySlider = new();
     private readonly TextBlock _opacityText = Ui.Label("80 %");
-    private readonly TextBlock _overlaySizeText = Ui.Label("", muted: true, size: 11);
+    private readonly TextBlock _overlaySizeText = Ui.Label("", muted: true, size: Ui.FontCaption);
     private RadioButton _ovWhole = new(), _ovRange = new();
     private readonly StackPanel _overlayEditor = new();
 
     // --- кроп
     private ToggleButton _cropToggle = new();
-    private readonly TextBlock _cropText = Ui.Label("", muted: true, size: 11);
+    private readonly TextBlock _cropText = Ui.Label("", muted: true, size: Ui.FontCaption);
 
     // --- ретушь
     private RedactRegion? _selectedRedaction;
@@ -44,7 +44,7 @@ public sealed partial class MainWindow
     private ComboBox _redactModeCombo = new();
     private RadioButton _rdWhole = new(), _rdRange = new();
     private TextBox _rdFrom = new(), _rdTo = new();
-    private readonly TextBlock _redactText = Ui.Label("", muted: true, size: 11);
+    private readonly TextBlock _redactText = Ui.Label("", muted: true, size: Ui.FontCaption);
 
     // --- запикать
     private readonly ListBox _censorList = new() { MaxHeight = 90, Margin = new Thickness(0, 4, 0, 4) };
@@ -103,7 +103,7 @@ public sealed partial class MainWindow
         _fadeOut = Ui.NumberBox(0, v => { if (_selectedOverlay is null) return; _selectedOverlay.FadeOutSec = Math.Max(0, v); }, 44, "0.#");
 
         _overlayEditor.Children.Add(Ui.Row(Ui.Label(T("Файл"), muted: true), _overlayFileCombo, Ui.SmallButton("…", BrowseOverlayFile, T("Выбрать PNG"))));
-        _overlayEditor.Children.Add(Ui.Label(T("Перетащите оверлей мышью, размер меняйте за любую сторону или угол."), muted: true, size: 11));
+        _overlayEditor.Children.Add(Ui.Label(T("Перетащите оверлей мышью, размер меняйте за любую сторону или угол."), muted: true, size: Ui.FontCaption));
         _overlayEditor.Children.Add(_overlaySizeText);
         _overlayEditor.Children.Add(Ui.FormRow(T("Прозрачность"), _opacitySlider, _opacityText, trailingWidth: 44));
         _overlayEditor.Children.Add(Ui.Row(Ui.Label(T("Показ"), muted: true), _ovWhole, _ovRange, _ovFrom, Ui.Label(T("по"), muted: true), _ovTo, Ui.Label(T("сек"), muted: true)));
@@ -341,7 +341,7 @@ public sealed partial class MainWindow
             _filterSliders[key] = (slider, value);
             col.Children.Add(Ui.FormRow(T(name), slider, value));
         }
-        col.Children.Add(Ui.Label(T("Результат виден на паузе; при воспроизведении показывается исходник. Двойной клик по ползунку — сброс."), muted: true, size: 11));
+        col.Children.Add(Ui.Label(T("Результат виден на паузе; при воспроизведении показывается исходник. Двойной клик по ползунку — сброс."), muted: true, size: Ui.FontCaption));
         col.Children.Add(Ui.Row(
             Ui.SmallButton(T("Сбросить"), () => { if (_current is null) return; _current.Filters = new VideoFilters(); SyncFiltersPanel(); RefreshFilteredFrameIfPaused(); }),
             Ui.SmallButton(T("Ко всем роликам"), () => { if (_current is null) return; foreach (var c in _clips) if (!ReferenceEquals(c, _current)) c.Filters = _current.Filters.Clone(); _statusInfo.Text = T("Фильтры применены ко всем роликам"); })));
@@ -470,7 +470,7 @@ public sealed partial class MainWindow
 
         var content = Ui.Column(
             Ui.Row(_redactToggle, Ui.SmallButton(T("+ Размытие"), () => AddRedaction(RedactMode.Blur)), Ui.SmallButton(T("+ Мозаика"), () => AddRedaction(RedactMode.Pixelate))),
-            Ui.Label(T("Лица, номера, недопустимый контент. Область можно двигать и растягивать на превью."), muted: true, size: 11),
+            Ui.Label(T("Лица, номера, недопустимый контент. Область можно двигать и растягивать на превью."), muted: true, size: Ui.FontCaption),
             _redactText,
             _redactEditor);
         return Ui.Card(Ui.Column(Ui.Header(T("РЕТУШЬ")), content));
@@ -552,7 +552,7 @@ public sealed partial class MainWindow
         modeCombo.SelectionChanged += (_, _) => { if (SelectedCensor is { } c) { c.Mode = modeCombo.SelectedIndex == 1 ? CensorMode.Mute : CensorMode.Beep; SyncCensorPanel(); } };
         var content = Ui.Column(
             Ui.Row(Ui.SmallButton(T("+ Запикать здесь"), () => AddCensor(modeCombo.SelectedIndex == 1 ? CensorMode.Mute : CensorMode.Beep), T("Новый интервал от текущей позиции на 1 с")), modeCombo),
-            Ui.Label(T("Выделите интервал: «Начало здесь» и «Конец здесь» по ходу воспроизведения."), muted: true, size: 11),
+            Ui.Label(T("Выделите интервал: «Начало здесь» и «Конец здесь» по ходу воспроизведения."), muted: true, size: Ui.FontCaption),
             _censorList,
             Ui.Row(
                 Ui.SmallButton(T("Начало здесь"), () => { if (SelectedCensor is { } c) { c.FromSec = Math.Round(Position, 2); if (c.ToSec <= c.FromSec) c.ToSec = c.FromSec + 0.5; SyncCensorPanel(); } }),

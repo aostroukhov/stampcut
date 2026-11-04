@@ -17,7 +17,7 @@ public sealed partial class MainWindow
     private UIElement BuildClipsPanel()
     {
         var panel = new DockPanel { Margin = new Thickness(10, 0, 4, 0) };
-        var header = Ui.Row(Ui.Label(T("Ролики"), weight: FontWeights.Bold, size: 13));
+        var header = Ui.Row(Ui.Label(T("Ролики"), weight: FontWeights.Bold));
         DockPanel.SetDock(header, Dock.Top);
         panel.Children.Add(header);
 
@@ -29,7 +29,7 @@ public sealed partial class MainWindow
         DockPanel.SetDock(buttons, Dock.Bottom);
         panel.Children.Add(buttons);
 
-        var hint = Ui.Label(T("Ролики склеиваются по порядку. У каждого — своя обрезка, кроп и ретушь. Оверлей общий."), muted: true, size: 11);
+        var hint = Ui.Label(T("Ролики склеиваются по порядку. У каждого — своя обрезка, кроп и ретушь. Оверлей общий."), muted: true, size: Ui.FontCaption);
         hint.Margin = new Thickness(0, 6, 0, 6);
         DockPanel.SetDock(hint, Dock.Bottom);
         panel.Children.Add(hint);
@@ -50,10 +50,10 @@ public sealed partial class MainWindow
             var c = _clips[i];
             var segs = c.OrderedSegments();
             var text = new StackPanel();
-            text.Children.Add(Ui.Label($"{i + 1}. {c.FileName}", size: 12, weight: FontWeights.SemiBold));
+            text.Children.Add(Ui.Label($"{i + 1}. {c.FileName}", weight: FontWeights.SemiBold));
             var info = segs.Count == 1 ? $"{TimeFormat.Format(segs[0].InSec, false)}–{TimeFormat.Format(segs[0].OutSec, false)}" : $"{segs.Count} {T("фрагм.")} {TimeFormat.Format(c.DurationSec, false)}";
             text.Children.Add(Ui.Label($"{info} · {c.Media.Width}×{c.Media.Height}" +
-                                       (c.Crop is { IsFull: false } ? $" · {T("кроп")}" : "") + (c.Redactions.Count > 0 ? $" · {T("ретушь")} {c.Redactions.Count}" : "") + (c.Censors.Count > 0 ? $" · {T("пик")} {c.Censors.Count}" : ""), muted: true, size: 11));
+                                       (c.Crop is { IsFull: false } ? $" · {T("кроп")}" : "") + (c.Redactions.Count > 0 ? $" · {T("ретушь")} {c.Redactions.Count}" : "") + (c.Censors.Count > 0 ? $" · {T("пик")} {c.Censors.Count}" : ""), muted: true, size: Ui.FontCaption));
             var item = new ListBoxItem { Content = text, Tag = c, Padding = new Thickness(8, 6, 8, 6) };
             _clipList.Items.Add(item);
             if (ReferenceEquals(c, _current)) _clipList.SelectedItem = item;

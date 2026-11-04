@@ -31,7 +31,7 @@ public sealed partial class MainWindow : Window
     private readonly PreviewControl _preview = new();
     private readonly TimelineControl _timeline = new();
     private readonly ListBox _clipList = new() { BorderThickness = new Thickness(0), Background = Brushes.Transparent };
-    private readonly TextBlock _timeText = Ui.Label("00:00.000 / 00:00.000", size: 13);
+    private readonly TextBlock _timeText = Ui.Label("00:00.000 / 00:00.000");
     private readonly TextBlock _fragmentText = Ui.Label("", muted: true);
     private readonly TextBlock _statusInfo = Ui.Label("", muted: true);
     private readonly TextBlock _statusHw = Ui.Label("", muted: true);
@@ -45,7 +45,7 @@ public sealed partial class MainWindow : Window
     private readonly StackPanel _infoContent = new() { Orientation = Orientation.Horizontal };
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(33) };
     private UIElement _transport = new Grid();
-    private readonly TextBlock _titleText = Ui.Label("StampCut", size: 12);
+    private readonly TextBlock _titleText = Ui.Label("StampCut");
     private UIElement _toolsStack = new Grid();
     private UIElement _clipButtons = new Grid();
 
@@ -78,7 +78,7 @@ public sealed partial class MainWindow : Window
         _cancelButton = Ui.SmallButton(T("Отмена"), CancelExport);
         _cancelButton.Visibility = Visibility.Collapsed;
         _playButton = Ui.Button("▶", TogglePlay, tooltip: T("Воспроизведение / пауза (Пробел)"), minWidth: 48);
-        _playButton.FontSize = 15; _playButton.Padding = new Thickness(14, 0, 14, 0);
+        _playButton.Padding = new Thickness(14, 0, 14, 0);
 
         Content = BuildLayout();
         WireEvents();
@@ -222,7 +222,7 @@ public sealed partial class MainWindow : Window
         _volume = Ui.Slider(-20, 20, 0, v => { if (_syncing) return; SetGain(Math.Round(v)); }, width: 120);
         _volume.TickFrequency = 1; _volume.IsSnapToTickEnabled = true;
         _volume.ToolTip = T("Громкость ролика (↑ ↓): так он играет здесь и с таким уровнем уйдёт в экспорт");
-        var vol = Ui.Label("🔊", size: 13);
+        var vol = Ui.Label("🔊");
         vol.Margin = new Thickness(10, 0, 2, 0);
         _gainText.Width = 48;
         var line2 = Ui.Row(
@@ -476,7 +476,7 @@ public sealed partial class MainWindow : Window
     private void ShowInfo(string text, InfoKind kind, params (string Label, Action Action)[] buttons)
     {
         _infoContent.Children.Clear();
-        var tb = Ui.Label(text, size: 13);
+        var tb = Ui.Label(text);
         tb.Margin = new Thickness(0, 0, 12, 0);
         tb.MaxWidth = 700;
         _infoContent.Children.Add(tb);

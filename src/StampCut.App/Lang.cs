@@ -89,7 +89,7 @@ public static class Lang
         ["Кадр"] = "Frame", ["из"] = "of", ["смещение"] = "offset", ["Без кропа: весь кадр"] = "No crop: whole frame",
         ["РЕТУШЬ"] = "RETOUCH", ["Изменить области"] = "Edit regions", ["+ Размытие"] = "+ Blur", ["+ Мозаика"] = "+ Mosaic",
         ["Лица, номера, недопустимый контент. Область можно двигать и растягивать на превью."] = "Faces, plates, unacceptable content. Drag and resize the region on the preview.",
-        ["Эффект"] = "Effect", ["Размытие"] = "Blur", ["Мозаика"] = "Mosaic", ["Радиус"] = "Radius", ["Квадратик"] = "Block", ["авто"] = "auto",
+        ["Эффект"] = "Effect", ["Размытие"] = "Blur", ["Мозаика"] = "Mosaic", ["мозаика"] = "mosaic", ["размытие"] = "blur", ["Радиус"] = "Radius", ["Квадратик"] = "Block", ["авто"] = "auto",
         ["✕ Удалить область"] = "✕ Delete region", ["Областей нет"] = "No regions", ["Областей: "] = "Regions: ", [" (кликните область на превью)"] = " (click a region on the preview)",
         ["ЗАПИКАТЬ ЗВУК"] = "BLEEP AUDIO", ["+ Запикать здесь"] = "+ Bleep here", ["Новый интервал от текущей позиции на 1 с"] = "New 1 s interval from the current position",
         ["тишина"] = "silence", ["Выделите интервал: «Начало здесь» и «Конец здесь» по ходу воспроизведения."] = "Mark the interval with “Start here” and “End here” while playing.",
