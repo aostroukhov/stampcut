@@ -20,7 +20,8 @@ public sealed class HardwareCapabilities
     {
         if (requested != HardwareEncoder.Auto)
             return requested == HardwareEncoder.None || Encoders.Contains(requested) ? requested : HardwareEncoder.None;
-        foreach (var e in new[] { HardwareEncoder.Nvenc, HardwareEncoder.Qsv, HardwareEncoder.Amf })
+        // Media Foundation — последним из аппаратных: на машинах без NVENC/QSV/AMF это обычно всё равно GPU-кодер драйвера
+        foreach (var e in new[] { HardwareEncoder.Nvenc, HardwareEncoder.Qsv, HardwareEncoder.Amf, HardwareEncoder.MediaFoundation })
             if (Encoders.Contains(e)) return e;
         return HardwareEncoder.None;
     }
@@ -73,8 +74,8 @@ public sealed class HardwareDetector
         foreach (var e in listed)
         {
             ct.ThrowIfCancellationRequested();
-            var ok = await TestEncoderAsync(EncoderName(e), ct).ConfigureAwait(false);
-            log?.Invoke($"{EncoderName(e)}: {(ok ? "работает" : "недоступен")}");
+            var (ok, why) = await TestEncoderAsync(EncoderName(e), ct).ConfigureAwait(false);
+            log?.Invoke($"{EncoderName(e)}: {(ok ? "работает" : "недоступен — " + why)}");
             if (ok) working.Add(e);
         }
 
@@ -140,19 +141,20 @@ public sealed class HardwareDetector
         catch { return false; }
     }
 
-    private async Task<bool> TestEncoderAsync(string encoder, CancellationToken ct)
+    private async Task<(bool Ok, string Why)> TestEncoderAsync(string encoder, CancellationToken ct)
     {
+        // кадр как в реальной работе: 1280x720 yuv420p, чтобы не упереться в минимальные размеры кодера
         var args = new[]
         {
-            "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=30", "-t", "0.3",
-            "-c:v", encoder, "-f", "null", "-"
+            "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=30", "-t", "0.3",
+            "-pix_fmt", "yuv420p", "-c:v", encoder, "-f", "null", "-"
         };
         try
         {
             var r = await ProcessRunner.RunAsync(_paths.Ffmpeg, args, ct, TimeSpan.FromSeconds(30)).ConfigureAwait(false);
-            return r.Success;
+            return (r.Success, r.Success ? "" : MediaProbe.Tail(r.StdErr, 2).Replace('\n', ' '));
         }
         catch (OperationCanceledException) { throw; }
-        catch { return false; }
+        catch (Exception ex) { return (false, ex.Message); }
     }
 }

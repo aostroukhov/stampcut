@@ -21,7 +21,11 @@ public static class Program
     public static async Task<int> Main(string[] args)
     {
         CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
+        try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { }
         if (args.Length == 0 || args[0] is "-h" or "--help" or "help") { Usage(); return 0; }
+        if (args[0] is "-v" or "--version" or "version") { Console.WriteLine(Version); return 0; }
+        // голый путь к файлу — анализ, как `probe`
+        if (args.Length == 1 && File.Exists(args[0])) args = new[] { "probe", args[0] };
         var settings = AppSettings.Load();
         var paths = FFmpegPaths.Locate(settings.FfmpegDir);
         try
@@ -42,11 +46,14 @@ public static class Program
 
     private static int Fail(string msg) { Console.Error.WriteLine("Ошибка: " + msg); return 2; }
 
-    private static void Usage() => Console.WriteLine("""
-        StampCut CLI
-          stampcut probe FILE                      — анализ файла
-          stampcut detect                          — проверить GPU-кодеры и фильтры ffmpeg
-          stampcut export [параметры] --clip FILE [параметры ролика] [--clip FILE ...]
+    public static string Version => typeof(Program).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+        .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion.Split('+')[0] ?? "0.0.0";
+
+    private static void Usage() => Console.WriteLine($"""
+        StampCut CLI {Version} — консольная версия; графическое приложение: StampCut.exe
+          stampcut-cli probe FILE                  — анализ файла (или просто: stampcut-cli FILE)
+          stampcut-cli detect                      — проверить GPU-кодеры и фильтры ffmpeg
+          stampcut-cli export [параметры] --clip FILE [параметры ролика] [--clip FILE ...]
             общие:   --preset ID  --encoder auto|none|nvenc|qsv|amf  --no-hwdecode  --out PATH  --dry-run  --list-presets
             оверлей: --overlay PNG  --anchor top-left|top-center|...|bottom-right  --offset X,Y(%)  --size W(%)  --opacity 0..1
                      --show FROM-TO (сек)  --fade IN,OUT (сек)

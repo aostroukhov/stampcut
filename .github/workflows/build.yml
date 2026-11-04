@@ -67,6 +67,9 @@ jobs:
       - name: Assemble portable folder
         shell: pwsh
         run: |
+          foreach ($f in @("StampCut.exe", "stampcut-cli.exe")) { if (-not (Test-Path "dist/StampCut/$f")) { throw "В сборке нет $f" } }
+          $gui = (Get-Item dist/StampCut/StampCut.exe).Length; $cli = (Get-Item dist/StampCut/stampcut-cli.exe).Length
+          if ($gui -eq $cli) { throw "StampCut.exe и stampcut-cli.exe одинакового размера: один затёр другой" }
           New-Item -ItemType Directory -Force dist/StampCut/tools/ffmpeg | Out-Null
           Copy-Item tools/ffmpeg/*.exe dist/StampCut/tools/ffmpeg/
           if (Test-Path tools/ffmpeg/LICENSE-ffmpeg.txt) { Copy-Item tools/ffmpeg/LICENSE-ffmpeg.txt dist/StampCut/tools/ffmpeg/ }

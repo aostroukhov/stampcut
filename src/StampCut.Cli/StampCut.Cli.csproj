@@ -3,7 +3,7 @@
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
     <RootNamespace>StampCut.Cli</RootNamespace>
-    <AssemblyName>stampcut</AssemblyName>
+    <AssemblyName>stampcut-cli</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../StampCut.Core/StampCut.Core.csproj" />

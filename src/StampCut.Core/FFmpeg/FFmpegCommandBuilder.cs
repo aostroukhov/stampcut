@@ -460,7 +460,10 @@ public static class FFmpegCommandBuilder
                     args.AddRange(new[] { "-c:v", "h264_amf", "-quality", "balanced", "-rc", "cqp", "-qp_i", crf.ToString(), "-qp_p", (crf + 2).ToString(), "-profile:v", profile, "-level", level });
                 break;
             case HardwareEncoder.MediaFoundation:
-                args.AddRange(new[] { "-c:v", "h264_mf", "-rate_control", "quality", "-quality", Math.Clamp(100 - crf * 2, 30, 95).ToString() });
+                if (q.MaxRateBps is { } mm)
+                    args.AddRange(new[] { "-c:v", "h264_mf", "-rate_control", "pc_vbr", "-b:v", Kbps((long)(mm * 0.8)), "-maxrate", Kbps(mm), "-profile:v", profile });
+                else
+                    args.AddRange(new[] { "-c:v", "h264_mf", "-rate_control", "quality", "-quality", Math.Clamp(100 - crf * 2, 30, 95).ToString(), "-profile:v", profile });
                 break;
             default:
                 args.AddRange(new[] { "-c:v", "libx264", "-preset", string.IsNullOrEmpty(p.X264Preset) ? "veryfast" : p.X264Preset, "-crf", crf.ToString(), "-profile:v", profile, "-level", level });

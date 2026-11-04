@@ -20,6 +20,7 @@
 - **GPU**: NVENC / Intel Quick Sync / AMD AMF и аппаратное декодирование — автоматически, с проверкой и откатом на CPU.
 - **Без перекодирования**: режим Machete для обрезки и склейки совместимых файлов за секунды.
 - Недавние файлы и папки, горячие клавиши, журнал и кнопка «Скопировать команду ffmpeg» для разбора проблем.
+- `stampcut-cli.exe` — то же самое из командной строки.
 
 ## Скачать и установить
 
@@ -51,17 +52,19 @@ FFmpeg (сборка BtbN win64-gpl) уже внутри. Установщик �
 
 ## Командная строка
 
-`stampcut.exe` рядом с приложением — те же возможности для скриптов и проверки конвейера:
+`stampcut-cli.exe` рядом с приложением — те же возможности для скриптов и проверки конвейера
+(графическое приложение — `StampCut.exe`, ему можно передать файл аргументом):
 
 ```bash
-stampcut probe IMG_1234.MOV
+stampcut-cli probe IMG_1234.MOV
 ```
 
 ```bash
-stampcut export --preset telegram-1080p --overlay logo.png --anchor bottom-right --size 25 --opacity 0.8 --clip IMG_1234.MOV --in 2 --to 45 --blur 0.4,0.3,0.2,0.3 --beep 10-11.5
+stampcut-cli export --preset telegram-1080p --overlay logo.png --anchor bottom-right --size 25 --opacity 0.8 --clip IMG_1234.MOV --in 2 --to 45 --blur 0.4,0.3,0.2,0.3 --beep 10-11.5
 ```
 
-`stampcut export --list-presets` покажет пресеты, `--dry-run` напечатает команду ffmpeg без запуска.
+`stampcut-cli export --list-presets` покажет пресеты, `--dry-run` напечатает команду ffmpeg без запуска,
+`stampcut-cli detect` — что из GPU реально работает и почему нет.
 
 ## Сборка из исходников
 
@@ -87,7 +90,7 @@ dotnet publish src/StampCut.App -c Release -r win-x64 --self-contained true -p:P
 |---|---|
 | `src/StampCut.Core` | Ядро: анализ файлов (ffprobe), модель проекта, сборка команд ffmpeg, GPU-детектор, экспорт, прокси, пресеты, настройки |
 | `src/StampCut.App` | Приложение WPF (интерфейс на C#, без XAML) |
-| `src/StampCut.Cli` | Консольная версия |
+| `src/StampCut.Cli` | Консольная версия (`stampcut-cli.exe`) |
 | `tests/StampCut.Core.Tests` | Модульные тесты ядра (xUnit) |
 | `installer/StampCut.iss` | Установщик Inno Setup |
 | `.github/workflows/build.yml` | Сборка, тесты, portable-архив и установщик на Windows |

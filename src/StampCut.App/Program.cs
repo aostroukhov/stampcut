@@ -24,6 +24,7 @@ public static class Program
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Logger.Error("Фатальная ошибка", e.ExceptionObject as Exception);
         TaskScheduler.UnobservedTaskException += (_, e) => { Logger.Error("Необработанная ошибка задачи", e.Exception); e.SetObserved(); };
 
+        Logger.Info("StampCut " + MainWindow.AppVersion + " запуск: " + string.Join(" ", args));
         var files = args.Where(File.Exists).Select(Path.GetFullPath).ToList();
         var window = new MainWindow(files);
         app.MainWindow = window;

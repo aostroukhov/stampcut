@@ -48,7 +48,7 @@ public sealed partial class MainWindow : Window
         _preset = _exportPresets.FirstOrDefault(p => p.Id == _s.Settings.LastExportPresetId) ?? _exportPresets[0];
         _overlayPresets = _s.Presets.LoadOverlayPresets();
 
-        Title = "StampCut";
+        Title = "StampCut " + AppVersion;
         MinWidth = 1100; MinHeight = 680; Width = 1360; Height = 820;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         Background = Ui.PanelBg;
@@ -80,6 +80,9 @@ public sealed partial class MainWindow : Window
             _s.Settings.Save();
         };
     }
+
+    public static string AppVersion => typeof(MainWindow).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+        .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion.Split('+')[0] ?? "0.0.0";
 
     // ------------------------------------------------------------------ компоновка
 
