@@ -273,6 +273,16 @@ public sealed class OverlayPresetFile
     public double? FadeInSec { get; set; }
     public double? FadeOutSec { get; set; }
     public List<ProjectFile.MotionEntry>? Motion { get; set; }
+    public TextSection? Text { get; set; }
+
+    public sealed class TextSection
+    {
+        public string Text { get; set; } = ""; public string? FontFamily { get; set; } public double? SizePercent { get; set; } public bool? Bold { get; set; }
+        public string? Color { get; set; } public string? Background { get; set; } public bool? Outline { get; set; } public string? Align { get; set; } public double? MaxWidthPercent { get; set; }
+        public TextStyle ToModel() => new() { Text = Text ?? "", FontFamily = string.IsNullOrWhiteSpace(FontFamily) ? "Segoe UI" : FontFamily!, SizePercent = Math.Clamp(SizePercent ?? 5, 1, 30), Bold = Bold ?? true,
+            Color = string.IsNullOrWhiteSpace(Color) ? "#FFFFFF" : Color!, Background = Background ?? "", Outline = Outline ?? false, Align = Align ?? "center", MaxWidthPercent = Math.Clamp(MaxWidthPercent ?? 90, 10, 100) };
+        public static TextSection FromModel(TextStyle t) => new() { Text = t.Text, FontFamily = t.FontFamily, SizePercent = t.SizePercent, Bold = t.Bold, Color = t.Color, Background = t.Background, Outline = t.Outline, Align = t.Align, MaxWidthPercent = t.MaxWidthPercent };
+    }
 
     public sealed class OffsetSection { public double X { get; set; } public double Y { get; set; } public string? Unit { get; set; } }
     public sealed class SizeSection { public double Width { get; set; } public string? Unit { get; set; } }
@@ -282,6 +292,7 @@ public sealed class OverlayPresetFile
     {
         var o = ToModelCore(fallbackId);
         if (Motion is not null) foreach (var k in Motion.OrderBy(k => k.T)) o.Motion.Add(new MotionKey { TimeSec = k.T, X = k.X, Y = k.Y });
+        if (Text is not null) o.Text = Text.ToModel();
         return o;
     }
 
@@ -309,6 +320,7 @@ public sealed class OverlayPresetFile
         TimeRange = o.FromSec is not null || o.ToSec is not null ? new TimeRangeSection { FromSec = o.FromSec ?? 0, ToSec = o.ToSec ?? 0 } : null,
         FadeInSec = o.FadeInSec, FadeOutSec = o.FadeOutSec,
         Motion = o.Motion.Count == 0 ? null : o.Motion.Select(k => new ProjectFile.MotionEntry { T = k.TimeSec, X = k.X, Y = k.Y }).ToList(),
+        Text = o.Text is null ? null : TextSection.FromModel(o.Text),
     };
 
     public static Anchor ParseAnchor(string? s) => s?.ToLowerInvariant().Replace("_", "-") switch

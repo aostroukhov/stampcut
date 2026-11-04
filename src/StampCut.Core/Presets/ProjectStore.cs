@@ -14,6 +14,8 @@ public sealed class ProjectFile
     public DateTime SavedAtUtc { get; set; }
     public string ExportPresetId { get; set; } = "";
     public bool NormalizeLoudness { get; set; }
+    public double TransitionSec { get; set; }
+    public string? Transition { get; set; }
     public List<ClipEntry> Clips { get; set; } = new();
     public List<OverlayPresetFile> Overlays { get; set; } = new();
 
@@ -26,6 +28,7 @@ public sealed class ProjectFile
         public List<CensorEntry> Censors { get; set; } = new();
         public double AudioGainDb { get; set; }
         public FiltersEntry? Filters { get; set; }
+        public int Stabilize { get; set; }
     }
     public sealed class FiltersEntry { public int Shadows { get; set; } public int Highlights { get; set; } public int Saturation { get; set; } = 100; public int Brightness { get; set; } public int Contrast { get; set; } }
     public sealed class SegmentEntry { public double In { get; set; } public double Out { get; set; } }
@@ -38,7 +41,7 @@ public sealed class ProjectFile
         public List<MotionEntry>? Motion { get; set; }
     }
     public sealed class MotionEntry { public double T { get; set; } public double X { get; set; } public double Y { get; set; } }
-    public sealed class CensorEntry { public double From { get; set; } public double To { get; set; } public string Mode { get; set; } = "beep"; }
+    public sealed class CensorEntry { public double From { get; set; } public double To { get; set; } public string Mode { get; set; } = "beep"; public double? LevelDb { get; set; } }
 }
 
 public sealed class ProjectLoadResult
@@ -47,6 +50,8 @@ public sealed class ProjectLoadResult
     public List<OverlaySettings> Overlays { get; } = new();
     public string ExportPresetId { get; set; } = "";
     public bool NormalizeLoudness { get; set; }
+    public double TransitionSec { get; set; }
+    public string Transition { get; set; } = "fade";
     public List<string> Warnings { get; } = new();
 }
 
@@ -60,9 +65,9 @@ public static class ProjectStore
 
     public static bool IsProjectFile(string path) => path.EndsWith(ProjectFile.Extension, StringComparison.OrdinalIgnoreCase);
 
-    public static void Save(string path, IEnumerable<Clip> clips, IEnumerable<OverlaySettings> overlays, string exportPresetId, bool normalizeLoudness = false)
+    public static void Save(string path, IEnumerable<Clip> clips, IEnumerable<OverlaySettings> overlays, string exportPresetId, bool normalizeLoudness = false, double transitionSec = 0, string? transition = null)
     {
-        var pf = ToFile(clips, overlays, exportPresetId, normalizeLoudness);
+        var pf = ToFile(clips, overlays, exportPresetId, normalizeLoudness, transitionSec, transition);
         var tmp = path + ".tmp";
         File.WriteAllText(tmp, JsonSerializer.Serialize(pf, Json));
         File.Move(tmp, path, overwrite: true);
@@ -71,18 +76,18 @@ public static class ProjectStore
     public static string Serialize(ProjectFile pf) => JsonSerializer.Serialize(pf, Json);
 
     /// <summary>Снимок состояния проекта (для истории изменений и проверки «есть несохранённое»).</summary>
-    public static ProjectFile ToFile(IEnumerable<Clip> clips, IEnumerable<OverlaySettings> overlays, string exportPresetId, bool normalizeLoudness = false)
+    public static ProjectFile ToFile(IEnumerable<Clip> clips, IEnumerable<OverlaySettings> overlays, string exportPresetId, bool normalizeLoudness = false, double transitionSec = 0, string? transition = null)
     {
-        var pf = new ProjectFile { ExportPresetId = exportPresetId, NormalizeLoudness = normalizeLoudness };
+        var pf = new ProjectFile { ExportPresetId = exportPresetId, NormalizeLoudness = normalizeLoudness, TransitionSec = transitionSec, Transition = transitionSec > 0 ? transition : null };
         foreach (var c in clips)
         {
-            var e = new ProjectFile.ClipEntry { Path = c.Media.Path, AudioGainDb = c.AudioGainDb };
+            var e = new ProjectFile.ClipEntry { Path = c.Media.Path, AudioGainDb = c.AudioGainDb, Stabilize = c.Stabilize };
             if (!c.Filters.IsDefault) e.Filters = new ProjectFile.FiltersEntry { Shadows = c.Filters.Shadows, Highlights = c.Filters.Highlights, Saturation = c.Filters.Saturation, Brightness = c.Filters.Brightness, Contrast = c.Filters.Contrast };
             foreach (var s in c.Segments) e.Segments.Add(new ProjectFile.SegmentEntry { In = s.InSec, Out = s.OutSec });
             if (c.Crop is { IsFull: false } cr) e.Crop = new ProjectFile.CropEntry { X = cr.X, Y = cr.Y, W = cr.W, H = cr.H };
             foreach (var r in c.Redactions) e.Redactions.Add(new ProjectFile.RedactEntry { X = r.X, Y = r.Y, W = r.W, H = r.H, Mode = r.Mode == RedactMode.Pixelate ? "pixelate" : "blur", BlockSize = r.BlockSize, BlurRadius = r.BlurRadius, From = r.FromSec, To = r.ToSec,
                 Motion = r.Motion.Count == 0 ? null : r.Motion.Select(k => new ProjectFile.MotionEntry { T = k.TimeSec, X = k.X, Y = k.Y }).ToList() });
-            foreach (var x in c.Censors) e.Censors.Add(new ProjectFile.CensorEntry { From = x.FromSec, To = x.ToSec, Mode = x.Mode == CensorMode.Mute ? "mute" : "beep" });
+            foreach (var x in c.Censors) e.Censors.Add(new ProjectFile.CensorEntry { From = x.FromSec, To = x.ToSec, Mode = x.Mode == CensorMode.Mute ? "mute" : "beep", LevelDb = x.LevelIsCurrent ? x.LevelDb : null });
             pf.Clips.Add(e);
         }
         foreach (var o in overlays) pf.Overlays.Add(OverlayPresetFile.FromModel(o));
@@ -92,7 +97,7 @@ public static class ProjectStore
     /// <summary>Восстановление из снимка: медиа берутся из кэша (без ffprobe).</summary>
     public static ProjectLoadResult FromFile(ProjectFile pf, Func<string, MediaInfo?> media)
     {
-        var result = new ProjectLoadResult { ExportPresetId = pf.ExportPresetId, NormalizeLoudness = pf.NormalizeLoudness };
+        var result = NewResult(pf);
         foreach (var e in pf.Clips)
         {
             var m = media(e.Path);
@@ -103,9 +108,16 @@ public static class ProjectStore
         return result;
     }
 
+    private static ProjectLoadResult NewResult(ProjectFile pf) => new()
+    {
+        ExportPresetId = pf.ExportPresetId, NormalizeLoudness = pf.NormalizeLoudness,
+        TransitionSec = Math.Clamp(pf.TransitionSec, 0, 5), Transition = ExportJob.Transitions.Contains(pf.Transition ?? "") ? pf.Transition! : "fade",
+    };
+
     private static Clip ClipFromEntry(ProjectFile.ClipEntry e, MediaInfo media)
     {
         var clip = Clip.FromMedia(media);
+        clip.Stabilize = Math.Clamp(e.Stabilize, 0, Clip.MaxStabilize);
         if (e.Segments.Count > 0)
         {
             clip.Segments.Clear();
@@ -122,7 +134,11 @@ public static class ProjectStore
             clip.Redactions.Add(region);
         }
         foreach (var x in e.Censors)
-            clip.Censors.Add(new AudioCensor { FromSec = x.From, ToSec = x.To, Mode = x.Mode == "mute" ? CensorMode.Mute : CensorMode.Beep });
+        {
+            var censor = new AudioCensor { FromSec = x.From, ToSec = x.To, Mode = x.Mode == "mute" ? CensorMode.Mute : CensorMode.Beep };
+            if (x.LevelDb is { } lv) censor.SetLevel(lv);
+            clip.Censors.Add(censor);
+        }
         return clip;
     }
 
@@ -131,7 +147,7 @@ public static class ProjectStore
     public static async Task<ProjectLoadResult> LoadAsync(string path, MediaProbe probe, CancellationToken ct = default)
     {
         var pf = Parse(await File.ReadAllTextAsync(path, ct));
-        var result = new ProjectLoadResult { ExportPresetId = pf.ExportPresetId, NormalizeLoudness = pf.NormalizeLoudness };
+        var result = NewResult(pf);
         var projectDir = Path.GetDirectoryName(path) ?? "";
         foreach (var e in pf.Clips)
         {

@@ -55,11 +55,12 @@ public static class Program
           stampcut-cli detect                      — проверить GPU-кодеры и фильтры ffmpeg
           stampcut-cli export [параметры] --clip FILE [параметры ролика] [--clip FILE ...]
             общие:   --preset ID  --encoder auto|none|nvenc|qsv|amf  --no-hwdecode  --out PATH  --dry-run  --list-presets
+                     --normalize (выровнять громкость)  --transition SEC[:fade|dissolve|wipeleft|…] (переходы между фрагментами)
             оверлей: --overlay PNG  --anchor top-left|top-center|...|bottom-right  --offset X,Y(%)  --size W(%)  --opacity 0..1
                      --show FROM-TO (сек)  --fade IN,OUT (сек)
             ролик:   --in SEC  --to SEC  (или несколько фрагментов: --segment FROM-TO --segment FROM-TO …)  --crop X,Y,W,H (доли 0..1)
                      --blur X,Y,W,H[,FROM,TO]  --pixelate X,Y,W,H[,FROM,TO]  --strength N (радиус/квадратик = N×4 px)
-                     --beep FROM-TO  --mute FROM-TO
+                     --beep FROM-TO  --mute FROM-TO  --stabilize 1..10 (стабилизация, два прохода)
         """);
 
     private static async Task<int> Probe(FFmpegPaths paths, string[] files)
@@ -98,7 +99,8 @@ public static class Program
         }
 
         string presetId = "telegram-1080p", encoderText = "auto", outPath = "";
-        bool hwDecode = true, dryRun = false;
+        bool hwDecode = true, dryRun = false, normalize = false;
+        double transitionSec = 0; string transition = "fade";
         var overlay = new OverlaySettings { Opacity = 0.8, Width = 25 };
         string? overlayFile = null;
         var clipSpecs = new List<ClipSpec>();
@@ -115,6 +117,9 @@ public static class Program
                 case "--no-hwdecode": hwDecode = false; break;
                 case "--out": outPath = Next(); break;
                 case "--dry-run": dryRun = true; break;
+                case "--normalize": normalize = true; break;
+                case "--transition": { var v = Next().Split(':'); transitionSec = Dbl(v[0]); if (v.Length > 1) transition = v[1]; break; }
+                case "--stabilize": Clip().Stabilize = (int)Dbl(Next()); break;
                 case "--overlay": overlayFile = Next(); break;
                 case "--anchor": overlay.Anchor = OverlayPresetFile.ParseAnchor(Next()); break;
                 case "--offset": { var v = Nums(Next(), 2); overlay.OffsetX = v[0]; overlay.OffsetY = v[1]; break; }
@@ -169,8 +174,11 @@ public static class Program
             if (spec.In is { } ci) clip.InSec = ci;
             if (spec.Out is { } co) clip.OutSec = Math.Min(co, media.DurationSec);
             clip.Crop = spec.Crop;
+            clip.Stabilize = spec.Stabilize;
             clip.Redactions.AddRange(spec.Redactions);
             clip.Censors.AddRange(spec.Censors);
+            foreach (var x in clip.Censors.Where(x => x.Mode == CensorMode.Beep && media.HasAudio))
+                if (await probe.MeanVolumeAsync(media.Path, x.FromSec, x.ToSec) is { } lv) x.SetLevel(lv); // тон — на уровне речи в этом месте
             clips.Add(clip);
             Console.Error.WriteLine($"{spec.Path}: {media.Summary()}");
         }
@@ -198,7 +206,8 @@ public static class Program
         }
 
         if (string.IsNullOrEmpty(outPath)) outPath = Exporter.DefaultOutputPath(clips[0], preset, null);
-        var job = new ExportJob { Clips = clips, Overlays = overlays, Preset = preset, OutputPath = outPath, Encoder = encoder, HwAccel = hwAccel };
+        var job = new ExportJob { Clips = clips, Overlays = overlays, Preset = preset, OutputPath = outPath, Encoder = encoder, HwAccel = hwAccel,
+            NormalizeLoudness = normalize, TransitionSec = transitionSec, Transition = transition, TempDir = AppPaths.TempDir };
 
         var errors = FFmpegCommandBuilder.Validate(job);
         if (errors.Count > 0) return Fail(string.Join("\n", errors));
@@ -231,6 +240,7 @@ public static class Program
         public CropRect? Crop;
         public List<Segment> Segments = new();
         public int Strength = 6;
+        public int Stabilize;
         public List<RedactRegion> Redactions = new();
         public List<AudioCensor> Censors = new();
     }

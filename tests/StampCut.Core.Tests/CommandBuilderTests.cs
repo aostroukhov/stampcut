@@ -165,12 +165,18 @@ public class CommandBuilderTests
     {
         var clip = Clip.FromMedia(Media());
         clip.InSec = 2;
-        clip.Censors.Add(new AudioCensor { FromSec = 3, ToSec = 4, Mode = CensorMode.Beep });
+        var beep = new AudioCensor { FromSec = 3, ToSec = 4, Mode = CensorMode.Beep };
+        beep.SetLevel(-23); // замеренная громкость речи: тон −23 dBFS RMS → амплитуда синуса 10^((−23+3)/20) = 0.1
+        clip.Censors.Add(beep);
         clip.Censors.Add(new AudioCensor { FromSec = 6, ToSec = 6.5, Mode = CensorMode.Mute });
         var r = FFmpegCommandBuilder.Build(Job(Telegram(), clip));
         Assert.Contains("sine=frequency=1000:sample_rate=48000", string.Join(" ", r.Args));
         Assert.Contains("volume=volume='if(between(t,1,2)+between(t,4,4.5),0,1)':eval=frame[a0_src]", r.FilterGraph);
-        Assert.Contains("volume=volume='if(between(t,1,2),0.25,0)':eval=frame[a0_beep]", r.FilterGraph);
+        Assert.Contains("volume=volume='if(between(t,1,2),0.1,0)':eval=frame[a0_beep]", r.FilterGraph);
+        // интервал сдвинули — замер устарел, берётся уровень по умолчанию (−20 dBFS → 0.141)
+        beep.ToSec = 4.5;
+        Assert.False(beep.LevelIsCurrent);
+        Assert.Contains("if(between(t,1,2.5),0.141,0)", FFmpegCommandBuilder.Build(Job(Telegram(), clip)).FilterGraph);
         Assert.Contains("amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a0]", r.FilterGraph);
     }
 
@@ -351,5 +357,36 @@ public class MotionTests
     {
         var job = new ExportJob { Clips = { Clip.FromMedia(TestData.Media()) }, Preset = TestData.Telegram(), OutputPath = "o.mp4", Encoder = HardwareEncoder.None, NormalizeLoudness = true };
         Assert.Contains("loudnorm=I=-16:TP=-1.5:LRA=11", FFmpegCommandBuilder.Build(job).FilterGraph);
+    }
+}
+
+public class TransitionAndStabTests
+{
+    [Fact]
+    public void Transitions_UseXfadeChain_AndShortenTotal()
+    {
+        var a = Clip.FromMedia(TestData.Media("C:/v/a.mp4", dur: 10));
+        var b = Clip.FromMedia(TestData.Media("C:/v/b.mp4", dur: 8));
+        var c = Clip.FromMedia(TestData.Media("C:/v/c.mp4", dur: 6));
+        var job = new ExportJob { Clips = { a, b, c }, Preset = TestData.Telegram(), OutputPath = "o.mp4", Encoder = HardwareEncoder.None, TransitionSec = 1, Transition = "dissolve" };
+        var g = FFmpegCommandBuilder.Build(job).FilterGraph;
+        Assert.Contains("[v0][v1]xfade=transition=dissolve:duration=1:offset=9[x1]", g);
+        Assert.Contains("[x1][v2]xfade=transition=dissolve:duration=1:offset=16[x2]", g);
+        Assert.Contains("[a0][a1]acrossfade=d=1:c1=tri:c2=tri[y1]", g);
+        Assert.DoesNotContain("concat=", g);
+        Assert.Equal(22, job.TotalDurationSec, 6);
+    }
+
+    [Fact]
+    public void Stabilize_AddsDetectPrePass_AndTransform()
+    {
+        var a = Clip.FromMedia(TestData.Media("C:/v/a.mp4", dur: 10)); a.Stabilize = 5; a.InSec = 2;
+        var job = new ExportJob { Clips = { a }, Preset = TestData.Telegram(), OutputPath = "o.mp4", Encoder = HardwareEncoder.None, TempDir = "C:/tmp" };
+        var r = FFmpegCommandBuilder.Build(job);
+        Assert.Single(r.PrePasses);
+        var pre = string.Join(" ", r.PrePasses[0].Args);
+        Assert.Contains("-ss 2 -i C:/v/a.mp4 -vf vidstabdetect=shakiness=5:accuracy=15:result='C\\:/tmp/stab-0-", pre);
+        Assert.Contains("vidstabtransform=input='C\\:/tmp/stab-0-", r.FilterGraph);
+        Assert.Contains(":smoothing=50:optzoom=1", r.FilterGraph);
     }
 }

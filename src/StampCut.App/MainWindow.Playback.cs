@@ -232,7 +232,13 @@ public sealed partial class MainWindow
             return;
         }
         if (!_censorMuted) { _censorMuted = true; _preview.Player.Volume = 0; }
-        if (inside.Mode == CensorMode.Beep && !_current.IsMuted) _beep.Start(); else _beep.Stop();
+        if (inside.Mode == CensorMode.Beep && !_current.IsMuted)
+        {
+            // тон на уровне дорожки (замер RMS) с поправкой громкости ролика; 0,5 — громкость плеера при 0 дБ (см. ApplyGainToPlayer)
+            _beep.SetAmplitude(AudioCensor.ToneAmplitude(inside.EffectiveLevelDb + _current.AudioGainDb) * 0.5);
+            _beep.Start();
+        }
+        else _beep.Stop();
     }
 
     private void OnTick()

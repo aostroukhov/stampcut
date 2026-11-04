@@ -253,6 +253,7 @@ public sealed class PreviewControl : Grid
                 var r = RectOut();
                 var sc = ToScreen(new Rect(frame.X + r.X * k, frame.Y + r.Y * k, r.Width * k, r.Height * k));
                 bool visibleNow = s.FromSec is null && s.ToSec is null || (OutputTimeSec >= (s.FromSec ?? 0) && OutputTimeSec <= (s.ToSec ?? double.MaxValue));
+                if (!ReferenceEquals(img.Source, item.Image)) img.Source = item.Image; // текстовая плашка перерисовывается при изменении размера
                 img.Opacity = s.Opacity * (visibleNow ? 1 : 0.25);
                 Place(img, sc.X, sc.Y, sc.Width, sc.Height);
                 Place(move, sc.X, sc.Y, sc.Width, sc.Height);

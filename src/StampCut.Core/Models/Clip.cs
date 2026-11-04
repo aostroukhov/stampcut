@@ -25,6 +25,9 @@ public sealed class Clip
     public const double MaxGainDb = 30;
     public bool IsMuted => AudioGainDb <= MuteDb + 0.5;
     public VideoFilters Filters { get; set; } = new();
+    /// <summary>Стабилизация: 0 — выключена, 1…10 — сила (shakiness для vidstab; сглаживание = сила × 10 кадров).</summary>
+    public int Stabilize { get; set; }
+    public const int MaxStabilize = 10;
 
     public static Clip FromMedia(MediaInfo media)
     {
@@ -252,6 +255,18 @@ public sealed class AudioCensor
     public double FromSec { get; set; }
     public double ToSec { get; set; }
     public CensorMode Mode { get; set; } = CensorMode.Beep;
+    /// <summary>Замеренная громкость дорожки в этом интервале (RMS, dBFS) — тон ставится на тот же уровень. Действительна, пока интервал не менялся.</summary>
+    public double? LevelDb { get; set; }
+    public double LevelFrom { get; set; } = -1;
+    public double LevelTo { get; set; } = -1;
+    /// <summary>Если дорожку не замеряли — разговорная речь на телефоне обычно около −20 dBFS.</summary>
+    public const double DefaultLevelDb = -20;
+    public bool LevelIsCurrent => LevelDb is not null && Math.Abs(LevelFrom - FromSec) < 0.011 && Math.Abs(LevelTo - ToSec) < 0.011;
+    public double EffectiveLevelDb => LevelIsCurrent ? LevelDb!.Value : DefaultLevelDb;
+    public void SetLevel(double db) { LevelDb = db; LevelFrom = FromSec; LevelTo = ToSec; }
 
-    public AudioCensor Clone() => new() { FromSec = FromSec, ToSec = ToSec, Mode = Mode };
+    /// <summary>Амплитуда синуса (0…1), при которой его RMS равен заданному уровню (у полного синуса RMS = −3 dBFS).</summary>
+    public static double ToneAmplitude(double levelDb) => Math.Clamp(Math.Pow(10, (Math.Clamp(levelDb, -60, 0) + 3) / 20.0), 0.01, 1);
+
+    public AudioCensor Clone() => new() { FromSec = FromSec, ToSec = ToSec, Mode = Mode, LevelDb = LevelDb, LevelFrom = LevelFrom, LevelTo = LevelTo };
 }

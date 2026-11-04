@@ -134,17 +134,13 @@ public sealed partial class MainWindow : Window
         _titleText.Margin = new Thickness(0, 0, 14, 0);
         _titleText.FontWeight = FontWeights.SemiBold;
         toolbar.Children.Add(_titleText);
-        var recentButton = Ui.Button(T("Недавние ▾"), () => { }, tooltip: T("Недавние файлы и папки"));
-        recentButton.Click += (_, _) => ShowRecentMenu(recentButton);
         var projectButton = Ui.Button(T("Проект ▾"), () => { }, tooltip: T("Сохранить или открыть проект"));
         projectButton.Click += (_, _) => ShowProjectMenu(projectButton);
         var helpButton = Ui.Button("?", () => { }, tooltip: T("О программе, обновления, отчёт о проблеме"), minWidth: 34);
         helpButton.Click += (_, _) => ShowHelpMenu(helpButton);
+        // как в больших редакторах: в шапке — проект и настройки, импорт файлов — в панели «Медиа», экспорт — в панели «Экспорт»
         foreach (var b in new[]
         {
-            Ui.Button(T("Открыть…"), () => OpenFiles(replace: true), tooltip: T("Открыть видео (Ctrl+O)")),
-            recentButton,
-            Ui.Button(T("+ Добавить ролик"), () => OpenFiles(replace: false), tooltip: T("Добавить ролик для склейки")),
             projectButton,
             Ui.Button(T("Настройки"), OpenSettings),
             helpButton,
@@ -166,6 +162,11 @@ public sealed partial class MainWindow : Window
         status.Children.Add(_statusInfo); status.Children.Add(_statusHw);
         DockPanel.SetDock(status, Dock.Bottom);
         dock.Children.Add(status);
+        // уведомления — полосой над строкой состояния, а не поверх видео
+        _infoBar.Child = _infoContent;
+        _infoBar.Margin = new Thickness(10, 0, 10, 2);
+        DockPanel.SetDock(_infoBar, Dock.Bottom);
+        dock.Children.Add(_infoBar);
 
         // три колонки с разделителями: ширина боковых панелей меняется мышью и запоминается
         var columns = new Grid();
@@ -194,8 +195,6 @@ public sealed partial class MainWindow : Window
         center.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         center.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         center.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        _infoBar.Child = _infoContent;
-        Grid.SetRow(_infoBar, 0); center.Children.Add(_infoBar);
         var previewBorder = new Border { Child = _preview, Background = Ui.PreviewBg, CornerRadius = new CornerRadius(8), Margin = new Thickness(0, 0, 0, 6), ClipToBounds = true };
         Grid.SetRow(previewBorder, 1); center.Children.Add(previewBorder);
         var transport = BuildTransport();
@@ -252,7 +251,7 @@ public sealed partial class MainWindow : Window
         _preview.Player.MediaOpened += (_, _) => OnMediaOpened();
         _preview.Player.MediaFailed += (_, e) => OnMediaFailed(e.ErrorException);
         _preview.Player.MediaEnded += (_, _) => { if (_followEdit) OnTick(); else Pause(); };
-        _preview.OverlayChanged += _ => SyncOverlayNumbers();
+        _preview.OverlayChanged += s => { OnOverlayResized(s); SyncOverlayNumbers(); };
         _preview.OverlaySelected += o => { _selectedOverlay = o; SyncOverlayPanel(); };
         _preview.CropChanged += () => { SyncCropPanel(); UpdateOutputGeometry(rebuild: false); };
         _preview.RedactionChanged += _ => SyncRedactPanel();
@@ -441,7 +440,7 @@ public sealed partial class MainWindow : Window
         }
         try
         {
-            Core.Presets.ProjectStore.Save(path, _clips, _overlays.Select(o => o.Settings), _preset.Id, _normalizeLoudness);
+            Core.Presets.ProjectStore.Save(path, _clips, _overlays.Select(o => o.Settings), _preset.Id, _normalizeLoudness, _transitionSec, _transition);
             DeleteAutosave(_projectPath);
             _projectPath = path;
             _history.MarkSaved();
@@ -499,6 +498,7 @@ public sealed partial class MainWindow : Window
         _preview.SelectedOverlay = _selectedOverlay;
         if (_exportPresets.FirstOrDefault(p => p.Id == result.ExportPresetId) is { } preset) { _preset = preset; RefreshPresetCombos(); }
         SetLoudness(result.NormalizeLoudness);
+        SetTransition(result.TransitionSec, result.Transition);
         _projectPath = asAutosaveOf is null ? path : (asAutosaveOf.Length == 0 ? null : asAutosaveOf);
         if (_projectPath is not null) { AppSettings.Touch(_s.Settings.RecentFiles, _projectPath); AppSettings.Touch(_s.Settings.RecentOpenDirs, Path.GetDirectoryName(_projectPath)); }
         _history.Reset(Snapshot(), saved: asAutosaveOf is null);
@@ -547,6 +547,7 @@ public sealed partial class MainWindow : Window
         _preview.Overlays.Clear(); _preview.SelectedOverlay = null;
         _projectPath = null;
         SetLoudness(false);
+        SetTransition(0, "fade");
         HideInfo();
         RefreshClipList(); SyncOverlayPanel(); SyncRedactPanel(); SyncCensorPanel(); UpdateExportInfo();
         ClearPreview();

@@ -110,6 +110,20 @@ public sealed class MediaProbe
         return list;
     }
 
+    /// <summary>Средняя громкость (RMS, dBFS) звуковой дорожки на интервале — через volumedetect. null — нет звука или не удалось.</summary>
+    public async Task<double?> MeanVolumeAsync(string path, double fromSec, double toSec, CancellationToken ct = default)
+    {
+        if (toSec <= fromSec) return null;
+        var args = new List<string> { "-hide_banner", "-nostats", "-loglevel", "info" };
+        if (fromSec > 0.001) args.AddRange(new[] { "-ss", TimeFormat.Num(fromSec) });
+        args.AddRange(new[] { "-to", TimeFormat.Num(toSec), "-i", path, "-vn", "-sn", "-dn", "-map", "0:a:0", "-af", "volumedetect", "-f", "null", "-" });
+        var r = await ProcessRunner.RunAsync(_paths.Ffmpeg, args, ct, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
+        var m = System.Text.RegularExpressions.Regex.Match(r.StdErr, @"mean_volume:\s*(-?[\d.]+)\s*dB");
+        if (!m.Success || !double.TryParse(m.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var db)) return null;
+        if (double.IsInfinity(db) || double.IsNaN(db) || db < -90) return null; // тишина: уровень не определить
+        return db;
+    }
+
     /// <summary>Размер изображения: PNG читается напрямую, остальное — через ffprobe.</summary>
     public async Task<(int Width, int Height)> ImageSizeAsync(string path, CancellationToken ct = default)
     {

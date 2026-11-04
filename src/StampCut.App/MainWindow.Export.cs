@@ -20,24 +20,70 @@ public sealed partial class MainWindow
     private string? _lastExportedFile;
     private bool _normalizeLoudness;
     private CheckBox _loudnessCheck = new();
+    private double _transitionSec;
+    private string _transition = "fade";
+    private sealed record TransitionChoice(string Id, string Name);
+    private static readonly TransitionChoice[] TransitionChoices =
+    {
+        new("", "Встык"), new("fade", "Затемнение"), new("dissolve", "Растворение"), new("fadeblack", "Через чёрное"), new("fadewhite", "Через белое"),
+        new("wipeleft", "Шторка влево"), new("wiperight", "Шторка вправо"), new("slideleft", "Сдвиг влево"), new("slideright", "Сдвиг вправо"),
+        new("smoothleft", "Плавный сдвиг"), new("circleopen", "Круг"), new("pixelize", "Пиксели"),
+    };
+    private ComboBox _transitionCombo = new();
+    private TextBox _transitionBox = new();
+    private StackPanel _transitionRow = new();
 
-    private UIElement BuildExportBlock()
+    /// <summary>Настройки и кнопка экспорта — содержимое панели «Экспорт» слева (без заголовка и карточки).</summary>
+    private UIElement BuildExportControls()
     {
         _exportPresetCombo = Ui.Combo(_exportPresets, p => p.Name, _preset, OnExportPresetSelected, width: 0);
         _exportButton = Ui.Button(T("Экспорт"), () => Fire(ExportAsync()), primary: true, tooltip: T("Экспортировать (Ctrl+E)"), minWidth: 120);
         _exportButton.Height = 36; _exportButton.Padding = new Thickness(18, 0, 18, 0);
         var openFolder = Ui.SmallButton(T("Открыть папку"), OpenLastFolder, T("Открыть папку с результатом"));
         _loudnessCheck = Ui.Check(T("Выровнять громкость (−16 LUFS, как у Telegram/YouTube)"), false, v => { if (_syncing) return; _normalizeLoudness = v; ScheduleCommit(); });
+        _transitionCombo = Ui.Combo(TransitionChoices, c => T(c.Name), TransitionChoices[0], c =>
+        {
+            if (_syncing) return;
+            _transition = c.Id.Length == 0 ? "fade" : c.Id;
+            _transitionSec = c.Id.Length == 0 ? 0 : (_transitionSec > 0 ? _transitionSec : 0.5);
+            SetTransition(_transitionSec, _transition);
+            UpdateExportInfo(); ScheduleCommit();
+        }, width: 150);
+        _transitionBox = Ui.NumberBox(0.5, v =>
+        {
+            if (_syncing) return;
+            _transitionSec = Math.Clamp(v, 0, 5);
+            if (_transitionSec > 0 && _transitionCombo.SelectedItem is TransitionChoice { Id: "" }) { _syncing = true; _transitionCombo.SelectedItem = TransitionChoices.First(c => c.Id == _transition); _syncing = false; }
+            UpdateExportInfo(); ScheduleCommit();
+        }, 48, "0.##");
+        _transitionRow = Ui.Row(Ui.Label(T("Переходы"), muted: true), _transitionCombo, _transitionBox, Ui.Label(T("сек"), muted: true));
+        _transitionRow.ToolTip = T("Плавный переход между соседними фрагментами; каждый переход укорачивает результат на свою длительность.");
         var col = Ui.Column(
-            Ui.Header(T("ЭКСПОРТ")),
             _exportPresetCombo,
             _loudnessCheck,
+            _transitionRow,
             _exportTarget,
             _exportDetails,
-            Ui.Row(_exportButton, openFolder));
+            Ui.Row(_exportButton, openFolder),
+            _exportProgress,
+            Ui.Row(_exportStatus, _cancelButton));
         _exportTarget.Margin = new Thickness(0, 4, 0, 0);
         _exportDetails.Margin = new Thickness(0, 0, 0, 8);
-        return Ui.Card(col);
+        return col;
+    }
+
+    private void SetTransition(double sec, string kind)
+    {
+        _transitionSec = Math.Clamp(sec, 0, 5);
+        _transition = ExportJob.Transitions.Contains(kind) ? kind : "fade";
+        _syncing = true;
+        try
+        {
+            _transitionCombo.SelectedItem = _transitionSec > 0 ? TransitionChoices.First(c => c.Id == _transition) : TransitionChoices[0];
+            Ui.SetNumber(_transitionBox, _transitionSec > 0 ? _transitionSec : 0.5, "0.##");
+            _transitionBox.IsEnabled = _transitionSec > 0;
+        }
+        finally { _syncing = false; }
     }
 
     private void OnExportPresetSelected(ExportPreset p)
@@ -91,7 +137,7 @@ public sealed partial class MainWindow
         _exportTarget.Text = $"→ {Path.GetFileName(path)}\n{Path.GetDirectoryName(path)}";
         try
         {
-            var job = new ExportJob { Clips = _clips, Preset = _preset, OutputPath = path, Encoder = HardwareEncoder.None };
+            var job = new ExportJob { Clips = _clips, Preset = _preset, OutputPath = path, Encoder = HardwareEncoder.None, TransitionSec = _transitionSec, Transition = _transition };
             if (_preset.StreamCopy)
                 _exportDetails.Text = T("Без перекодирования: потоки копируются как есть, секунды.");
             else
@@ -99,7 +145,9 @@ public sealed partial class MainWindow
                 var (w, h) = FFmpegCommandBuilder.ComputeOutputSize(job);
                 int fps = FFmpegCommandBuilder.ComputeOutputFps(job);
                 double total = job.TotalDurationSec;
-                _exportDetails.Text = $"{w}×{h} · {(fps > 0 ? fps + " " + T("к/с") : T("частота исходника"))} · {TimeFormat.Format(total, false)}" + (_clips.Count > 1 ? $" · {_clips.Count} {T("ролика(ов)")}" : "");
+                _exportDetails.Text = $"{w}×{h} · {(fps > 0 ? fps + " " + T("к/с") : T("частота исходника"))} · {TimeFormat.Format(total, false)}" + (_clips.Count > 1 ? $" · {_clips.Count} {T("ролика(ов)")}" : "")
+                    + (job.EffectiveTransitionSec > 0 ? $" · {T("переходы")} {TimeFormat.Num(job.EffectiveTransitionSec)} {T("с")}" : "")
+                    + (_clips.Any(c => c.Stabilize > 0) ? $" · {T("стабилизация")}" : "");
             }
         }
         catch (Exception ex) { _exportDetails.Text = ex.Message; }
@@ -127,15 +175,41 @@ public sealed partial class MainWindow
 
     private async Task ExportCoreAsync(CancellationToken ct)
     {
+        var tempPngs = new List<string>();
+        try { await ExportInnerAsync(ct, tempPngs); }
+        finally { foreach (var f in tempPngs) try { File.Delete(f); } catch { } }
+    }
+
+    private async Task ExportInnerAsync(CancellationToken ct, List<string> tempPngs)
+    {
         var resolved = new List<ResolvedOverlay>();
+        int outW = 0, outH = 0;
+        if (!_preset.StreamCopy)
+            try { (outW, outH) = FFmpegCommandBuilder.ComputeOutputSize(new ExportJob { Clips = _clips, Preset = _preset, OutputPath = "x", Encoder = HardwareEncoder.None }); } catch { }
         foreach (var item in _overlays)
         {
+            if (item.Settings.Text is { } text)
+            {
+                // текстовая плашка: рисуется под размер выходного кадра во временный PNG
+                if (outW == 0 || TextRenderer.Render(text, outW, outH) is not { } bmp) continue;
+                var png = Path.Combine(AppPaths.TempDir, $"text-{item.Settings.Id}-{Guid.NewGuid():N}.png");
+                TextRenderer.SavePng(bmp, png); tempPngs.Add(png);
+                var s = item.Settings.Clone(); s.WidthUnit = SizeUnit.Pixels; s.Width = bmp.PixelWidth;
+                resolved.Add(new ResolvedOverlay { Settings = s, Path = png, Width = bmp.PixelWidth, Height = bmp.PixelHeight });
+                continue;
+            }
             if (item.ResolvedPath is null || item.PngWidth == 0) continue;
             resolved.Add(new ResolvedOverlay { Settings = item.Settings, Path = item.ResolvedPath, Width = item.PngWidth, Height = item.PngHeight });
         }
-        if (_overlays.Count > resolved.Count) ShowInfo(T("У части оверлеев не выбран PNG-файл — они пропущены."), InfoKind.Warning);
+        if (_overlays.Count > resolved.Count && !_preset.StreamCopy) ShowInfo(T("У части оверлеев не выбран PNG-файл — они пропущены."), InfoKind.Warning);
 
         Autosave("export");
+        if (_clips.Any(c => c.Censors.Any(NeedsLevel)))
+        {
+            _statusInfo.Text = T("Замеряю громкость дорожки…");
+            while (_measuringCensors) await Task.Delay(100, ct);
+            foreach (var c in _clips) await MeasureCensorLevelsAsync(c, ct);
+        }
         _statusInfo.Text = T("Проверяю GPU…");
         await _s.HardwareReady;
         var encoder = _preset.StreamCopy ? HardwareEncoder.None : _s.ResolveEncoder(_preset);
@@ -144,6 +218,7 @@ public sealed partial class MainWindow
         {
             Clips = _clips.ToList(), Overlays = resolved, Preset = _preset, OutputPath = outputPath,
             Encoder = encoder, HwAccel = _preset.StreamCopy ? "" : _s.ResolveHwAccel(encoder), NormalizeLoudness = _normalizeLoudness,
+            TransitionSec = _transitionSec, Transition = _transition, TempDir = AppPaths.TempDir,
         };
         var errors = FFmpegCommandBuilder.Validate(job);
         if (errors.Count > 0) { ShowInfo(string.Join(" ", errors), InfoKind.Error); _statusInfo.Text = ""; return; }

@@ -20,7 +20,7 @@ public sealed partial class MainWindow
     private readonly DispatcherTimer _autosaveTimer = new() { Interval = TimeSpan.FromSeconds(60) };
     private bool _restoring;
 
-    private ProjectFile Snapshot() => ProjectStore.ToFile(_clips, _overlays.Select(o => o.Settings), _preset.Id, _normalizeLoudness);
+    private ProjectFile Snapshot() => ProjectStore.ToFile(_clips, _overlays.Select(o => o.Settings), _preset.Id, _normalizeLoudness, _transitionSec, _transition);
 
     /// <summary>Отложенная запись снимка: вызывается после любого изменения; несколько изменений подряд сливаются в один шаг.</summary>
     private void ScheduleCommit()
@@ -73,6 +73,7 @@ public sealed partial class MainWindow
         _preview.SelectedOverlay = _selectedOverlay;
         if (_exportPresets.FirstOrDefault(p => p.Id == result.ExportPresetId) is { } preset && !ReferenceEquals(preset, _preset)) { _preset = preset; RefreshPresetCombos(); _timeline.SnapToKeyframes = _preset.StreamCopy; }
         SetLoudness(result.NormalizeLoudness);
+        SetTransition(result.TransitionSec, result.Transition);
         _activeSegment = null; _selectedRedaction = null;
         RefreshClipList(); SyncOverlayPanel(); UpdateExportInfo();
         if (_clips.Count == 0) { _current = null; ClearPreview(); return; }
@@ -126,7 +127,7 @@ public sealed partial class MainWindow
             CommitNow();
             if (_clips.Count == 0 || !_history.IsDirty) return;
             var path = AutosavePath(_projectPath);
-            ProjectStore.Save(path, _clips, _overlays.Select(o => o.Settings), _preset.Id, _normalizeLoudness);
+            ProjectStore.Save(path, _clips, _overlays.Select(o => o.Settings), _preset.Id, _normalizeLoudness, _transitionSec, _transition);
             File.WriteAllText(path + ".origin", _projectPath ?? "");
             Logger.Info($"Автосохранение ({reason}): {path}");
         }

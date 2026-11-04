@@ -7,11 +7,24 @@ public sealed class BeepPlayer : IDisposable
 {
     private readonly SoundPlayer _player;
     private bool _playing;
+    private double _amplitude = 0.25;
 
     public BeepPlayer()
     {
-        _player = new SoundPlayer(MakeTone(1000, 1.0, 8000, 0.25));
+        _player = new SoundPlayer(MakeTone(1000, 1.0, 8000, _amplitude));
         try { _player.Load(); } catch { }
+    }
+
+    /// <summary>Амплитуда тона (0…1) — под уровень дорожки ролика; при изменении тон пересобирается.</summary>
+    public void SetAmplitude(double amplitude)
+    {
+        amplitude = Math.Clamp(amplitude, 0.005, 1);
+        if (Math.Abs(amplitude - _amplitude) < 0.005) return;
+        _amplitude = amplitude;
+        bool was = _playing;
+        Stop();
+        try { _player.Stream = MakeTone(1000, 1.0, 8000, _amplitude); _player.Load(); } catch { }
+        if (was) Start();
     }
 
     public bool IsPlaying => _playing;

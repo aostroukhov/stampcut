@@ -29,6 +29,31 @@ public sealed partial class MainWindow
     private readonly TextBlock _overlaySizeText = Ui.Label("", muted: true, size: Ui.FontCaption);
     private RadioButton _ovWhole = new(), _ovRange = new();
     private readonly StackPanel _overlayEditor = new();
+    private StackPanel _overlayFileRow = new();
+    private readonly StackPanel _textEditor = new();
+    private readonly TextBox _textBox = new() { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 52, MaxHeight = 96, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, FontSize = Ui.FontBody, Margin = new Thickness(0, 2, 0, 4) };
+    private readonly ComboBox _textFontCombo = new() { Width = 160, Height = Ui.ControlHeight };
+    private Slider _textSizeSlider = new();
+    private readonly TextBlock _textSizeText = Ui.Label("5 %");
+    private ToggleButton _textBold = new();
+    private readonly ComboBox _textColorCombo = new() { Width = 100, Height = Ui.ControlHeight };
+    private readonly ComboBox _textBgCombo = new() { Width = 100, Height = Ui.ControlHeight };
+    private readonly ComboBox _textAlignCombo = new() { Width = 100, Height = Ui.ControlHeight };
+    private CheckBox _textOutline = new();
+    private static readonly (string Name, string Hex)[] TextColors = { ("Белый", "#FFFFFF"), ("Чёрный", "#000000"), ("Жёлтый", "#FFD500"), ("Красный", "#E53935"), ("Синий", "#1E88E5"), ("Зелёный", "#43A047") };
+    private static readonly (string Name, string Hex)[] TextBackgrounds = { ("Без подложки", ""), ("Тёмная", "#99000000"), ("Чёрная", "#FF000000"), ("Светлая", "#B3FFFFFF"), ("Белая", "#FFFFFFFF"), ("Красная", "#CCC62828"), ("Синяя", "#CC1565C0"), ("Жёлтая", "#CCFFD500") };
+    private static readonly (string Name, string Id)[] TextAligns = { ("По центру", "center"), ("Слева", "left"), ("Справа", "right") };
+
+    // --- стабилизация
+    private Slider _stabSlider = new();
+    private readonly TextBlock _stabValue = Ui.Label("", muted: true);
+
+    // --- поиск лиц
+    private FaceFinder? _faceFinder;
+    private FaceFinder Faces => _faceFinder ??= new FaceFinder(_s);
+    private CancellationTokenSource? _faceCts;
+    private Button _faceStop = new();
+    private readonly TextBlock _faceStatus = Ui.Label("", muted: true, size: Ui.FontCaption);
 
     // --- кроп
     private ToggleButton _cropToggle = new();
@@ -62,14 +87,8 @@ public sealed partial class MainWindow
         stack.Children.Add(BuildCropSection());
         stack.Children.Add(BuildRedactSection());
         stack.Children.Add(BuildCensorSection());
-        var scroll = new ScrollViewer { Content = stack, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Focusable = false };
-        var dock = new DockPanel();
-        var export = BuildExportBlock();
-        ((FrameworkElement)export).Margin = new Thickness(4, 0, 10, 0);
-        DockPanel.SetDock(export, Dock.Bottom);
-        dock.Children.Add(export);
-        dock.Children.Add(scroll);
-        return dock;
+        // правая колонка — инспектор свойств выбранного ролика (как Effect Controls / Inspector в больших редакторах)
+        return new ScrollViewer { Content = stack, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Focusable = false };
     }
 
     // ------------------------------------------------------------------ оверлей
@@ -77,7 +96,7 @@ public sealed partial class MainWindow
     private UIElement BuildOverlaySection()
     {
         _overlayPresetCombo = Ui.Combo(_overlayPresets, p => p.Name, null, AddOverlayFromPreset, width: 200);
-        var presetRow = Ui.Row(_overlayPresetCombo, Ui.SmallButton("+", () => AddOverlayFromPreset(null), T("Добавить пустой оверлей")));
+        var presetRow = Ui.Row(_overlayPresetCombo, Ui.SmallButton("+", () => AddOverlayFromPreset(null), T("Добавить пустой оверлей")), Ui.SmallButton(T("+ Текст"), AddTextOverlay, T("Текстовая плашка: заголовок, подпись, источник")));
         _overlayList.SelectionChanged += (_, _) =>
         {
             if (_syncing) return;
@@ -105,7 +124,10 @@ public sealed partial class MainWindow
         _fadeIn = Ui.NumberBox(0, v => { if (_selectedOverlay is null) return; _selectedOverlay.FadeInSec = Math.Max(0, v); ScheduleCommit(); }, 44, "0.#");
         _fadeOut = Ui.NumberBox(0, v => { if (_selectedOverlay is null) return; _selectedOverlay.FadeOutSec = Math.Max(0, v); ScheduleCommit(); }, 44, "0.#");
 
-        _overlayEditor.Children.Add(Ui.Row(Ui.Label(T("Файл"), muted: true), _overlayFileCombo, Ui.SmallButton("…", BrowseOverlayFile, T("Выбрать PNG"))));
+        _overlayFileRow = Ui.Row(Ui.Label(T("Файл"), muted: true), _overlayFileCombo, Ui.SmallButton("…", BrowseOverlayFile, T("Выбрать PNG")));
+        _overlayEditor.Children.Add(_overlayFileRow);
+        BuildTextEditor();
+        _overlayEditor.Children.Add(_textEditor);
         _overlayEditor.Children.Add(Ui.Label(T("Перетащите оверлей мышью, размер меняйте за любую сторону или угол."), muted: true, size: Ui.FontCaption));
         _overlayEditor.Children.Add(_overlaySizeText);
         _overlayEditor.Children.Add(Ui.FormRow(T("Прозрачность"), _opacitySlider, _opacityText, trailingWidth: 44));
@@ -146,15 +168,19 @@ public sealed partial class MainWindow
     private double OutputTime()
     {
         if (_current is null) return 0;
-        double before = _clips.TakeWhile(c => !ReferenceEquals(c, _current)).Sum(c => c.DurationSec);
+        var earlier = _clips.TakeWhile(c => !ReferenceEquals(c, _current)).ToList();
+        double before = earlier.Sum(c => c.DurationSec);
+        int partsBefore = earlier.Sum(c => c.OrderedSegments().Count);
         double pos = Position, inner = 0;
         foreach (var s in _current.OrderedSegments())
         {
-            if (pos >= s.OutSec) inner += s.DurationSec;
+            if (pos >= s.OutSec) { inner += s.DurationSec; partsBefore++; }
             else if (pos > s.InSec) { inner += pos - s.InSec; break; }
             else break;
         }
-        return before + inner;
+        // переходы накладывают фрагменты друг на друга: каждый предыдущий стык укорачивает ленту
+        double tr = _transitionSec > 0 ? new ExportJob { Clips = _clips, Preset = _preset, OutputPath = "x", TransitionSec = _transitionSec }.EffectiveTransitionSec : 0;
+        return Math.Max(0, before + inner - tr * partsBefore);
     }
 
     private OverlayItem ItemOf(OverlaySettings s) => _overlays.First(i => ReferenceEquals(i.Settings, s));
@@ -185,7 +211,136 @@ public sealed partial class MainWindow
         SyncOverlayPanel();
         _preview.Refresh();
         ScheduleCommit();
-        if (item.ResolvedPath is null) BrowseOverlayFile();
+        if (item.ResolvedPath is null && !s.IsText) BrowseOverlayFile();
+    }
+
+    // ------------------------------------------------------------------ текстовая плашка
+
+    private void AddTextOverlay()
+    {
+        if (_overlays.Count >= 3) { ShowInfo(T("Не больше трёх оверлеев."), InfoKind.Warning); return; }
+        var s = new OverlaySettings
+        {
+            Name = T("Текст"), Anchor = Anchor.BottomCenter, OffsetX = 0, OffsetY = 6, OffsetUnit = OffsetUnit.Percent, Opacity = 1, WidthUnit = SizeUnit.Pixels,
+            Text = new TextStyle { Text = T("Заголовок") },
+        };
+        var item = new OverlayItem { Settings = s };
+        LoadOverlayImage(item);
+        _overlays.Add(item);
+        _selectedOverlay = s;
+        _preview.Overlays.Clear(); _preview.Overlays.AddRange(_overlays);
+        _preview.SelectedOverlay = s;
+        SyncOverlayPanel();
+        _preview.Refresh();
+        ScheduleCommit();
+        _textBox.Focus(); _textBox.SelectAll();
+    }
+
+    /// <summary>Нарисовать плашку под текущий размер выходного кадра; ширина оверлея всегда равна ширине картинки (в пикселях выхода).</summary>
+    private void RenderTextOverlay(OverlayItem item)
+    {
+        if (item.Settings.Text is not { } t) return;
+        int w = _preview.OutputWidth > 0 ? _preview.OutputWidth : 1920, h = _preview.OutputHeight > 0 ? _preview.OutputHeight : 1080;
+        item.ResolvedPath = null;
+        var bmp = TextRenderer.Render(t, w, h);
+        item.Image = bmp;
+        item.PngWidth = bmp?.PixelWidth ?? 0; item.PngHeight = bmp?.PixelHeight ?? 0;
+        item.Settings.WidthUnit = SizeUnit.Pixels;
+        item.Settings.Width = Math.Max(1, item.PngWidth);
+    }
+
+    private void RefreshTextOverlays()
+    {
+        bool any = false;
+        foreach (var item in _overlays) if (item.Settings.IsText) { RenderTextOverlay(item); any = true; }
+        if (any) _preview.Layout();
+    }
+
+    /// <summary>Растягивание плашки за рукоятки меняет размер шрифта, а не масштаб картинки — текст остаётся чётким.</summary>
+    private void OnOverlayResized(OverlaySettings s)
+    {
+        if (s.Text is not { } t) return;
+        var item = ItemOf(s);
+        if (item.PngWidth <= 0 || Math.Abs(s.Width - item.PngWidth) < 0.5) return;
+        t.SizePercent = Math.Clamp(t.SizePercent * s.Width / item.PngWidth, 1, 30);
+        RenderTextOverlay(item);
+        _syncing = true; _textSizeSlider.Value = t.SizePercent; _textSizeText.Text = $"{t.SizePercent:0.#} %"; _syncing = false;
+    }
+
+    private void BuildTextEditor()
+    {
+        _textBox.TextChanged += (_, _) => ApplyTextChange(t => t.Text = _textBox.Text, renameOverlay: true);
+        foreach (var f in TextRenderer.FontFamilies()) _textFontCombo.Items.Add(new ComboBoxItem { Content = f, Tag = f, FontFamily = new FontFamily(f) });
+        _textFontCombo.SelectionChanged += (_, _) => { if (_textFontCombo.SelectedItem is ComboBoxItem { Tag: string f }) ApplyTextChange(t => t.FontFamily = f); };
+        _textSizeSlider = Ui.Slider(1, 30, 5, v => { _textSizeText.Text = $"{v:0.#} %"; ApplyTextChange(t => t.SizePercent = v); }, width: 0);
+        _textBold = Ui.Toggle(T("Жирный"), true, v => ApplyTextChange(t => t.Bold = v));
+        FillHexCombo(_textColorCombo, TextColors, "#FFFFFF");
+        _textColorCombo.SelectionChanged += (_, _) => { if (_textColorCombo.SelectedItem is ComboBoxItem { Tag: string hex }) ApplyTextChange(t => t.Color = hex); };
+        FillHexCombo(_textBgCombo, TextBackgrounds, "#99000000");
+        _textBgCombo.SelectionChanged += (_, _) => { if (_textBgCombo.SelectedItem is ComboBoxItem { Tag: string hex }) ApplyTextChange(t => t.Background = hex); };
+        foreach (var (name, id) in TextAligns) _textAlignCombo.Items.Add(new ComboBoxItem { Content = T(name), Tag = id });
+        _textAlignCombo.SelectedIndex = 0;
+        _textAlignCombo.SelectionChanged += (_, _) => { if (_textAlignCombo.SelectedItem is ComboBoxItem { Tag: string id }) ApplyTextChange(t => t.Align = id); };
+        _textOutline = Ui.Check(T("Обводка"), false, v => ApplyTextChange(t => t.Outline = v));
+
+        _textEditor.Children.Add(_textBox);
+        _textEditor.Children.Add(Ui.Row(Ui.Label(T("Шрифт"), muted: true), _textFontCombo, _textBold));
+        _textEditor.Children.Add(Ui.FormRow(T("Размер"), _textSizeSlider, _textSizeText, trailingWidth: 48));
+        _textEditor.Children.Add(Ui.Row(Ui.Label(T("Цвет"), muted: true), _textColorCombo, Ui.Label(T("Подложка"), muted: true), _textBgCombo));
+        _textEditor.Children.Add(Ui.Row(Ui.Label(T("Строки"), muted: true), _textAlignCombo, _textOutline));
+        _textEditor.Visibility = Visibility.Collapsed;
+    }
+
+    private void FillHexCombo(ComboBox cb, (string Name, string Hex)[] items, string current)
+    {
+        cb.Items.Clear();
+        ComboBoxItem? selected = null;
+        foreach (var (name, hex) in items)
+        {
+            var ci = new ComboBoxItem { Content = T(name), Tag = hex };
+            if (string.Equals(hex, current, StringComparison.OrdinalIgnoreCase)) selected = ci;
+            cb.Items.Add(ci);
+        }
+        if (selected is null) { selected = new ComboBoxItem { Content = current, Tag = current }; cb.Items.Add(selected); }
+        cb.SelectedItem = selected;
+    }
+
+    private void ApplyTextChange(Action<TextStyle> change, bool renameOverlay = false)
+    {
+        if (_syncing || _selectedOverlay?.Text is not { } t) return;
+        change(t);
+        if (renameOverlay)
+        {
+            var first = t.Text.Split('\n')[0].Trim();
+            _selectedOverlay.Name = first.Length == 0 ? T("Текст") : (first.Length > 24 ? first[..24] + "…" : first);
+            foreach (ListBoxItem li in _overlayList.Items) if (ReferenceEquals(li.Tag, _selectedOverlay)) li.Content = OverlayListLabel(ItemOf(_selectedOverlay));
+        }
+        RenderTextOverlay(ItemOf(_selectedOverlay));
+        _overlaySizeText.Text = $"{T("Шрифт")}: {t.SizePercent:0.#} % {T("высоты кадра")}";
+        _preview.Layout();
+        ScheduleCommit();
+    }
+
+    private string OverlayListLabel(OverlayItem item)
+    {
+        var s = item.Settings;
+        if (s.IsText) return "T  " + (s.Name.Length > 0 ? s.Name : T("Текст"));
+        return (s.Name.Length > 0 ? s.Name : T("Оверлей")) + (item.ResolvedPath is null ? "  " + T("(файл не выбран)") : "");
+    }
+
+    private void SyncTextEditor(OverlaySettings o)
+    {
+        if (o.Text is not { } t) return;
+        _textBox.Text = t.Text;
+        foreach (ComboBoxItem ci in _textFontCombo.Items) if (string.Equals(ci.Tag as string, t.FontFamily, StringComparison.OrdinalIgnoreCase)) { _textFontCombo.SelectedItem = ci; break; }
+        if (_textFontCombo.SelectedItem is not ComboBoxItem { Tag: string tag } || !string.Equals(tag, t.FontFamily, StringComparison.OrdinalIgnoreCase))
+        { var ci = new ComboBoxItem { Content = t.FontFamily, Tag = t.FontFamily }; _textFontCombo.Items.Insert(0, ci); _textFontCombo.SelectedItem = ci; }
+        _textSizeSlider.Value = t.SizePercent; _textSizeText.Text = $"{t.SizePercent:0.#} %";
+        _textBold.IsChecked = t.Bold;
+        FillHexCombo(_textColorCombo, TextColors, t.Color);
+        FillHexCombo(_textBgCombo, TextBackgrounds, t.Background);
+        foreach (ComboBoxItem ci in _textAlignCombo.Items) if ((string)ci.Tag == t.Align) _textAlignCombo.SelectedItem = ci;
+        _textOutline.IsChecked = t.Outline;
     }
 
     private void AddOverlayFromFile(string png)
@@ -212,6 +367,7 @@ public sealed partial class MainWindow
 
     private void LoadOverlayImage(OverlayItem item)
     {
+        if (item.Settings.IsText) { RenderTextOverlay(item); return; }
         item.ResolvedPath = _s.Presets.ResolveOverlayFile(item.Settings.File, AppPaths.OverlaysDir);
         item.Image = null; item.PngWidth = item.PngHeight = 0;
         if (item.ResolvedPath is null) return;
@@ -262,7 +418,7 @@ public sealed partial class MainWindow
     {
         var o = _selectedOverlay;
         if (o is null) return;
-        _overlaySizeText.Text = $"{T("Ширина")}: {o.Width:0.#}% {T("кадра")}";
+        _overlaySizeText.Text = o.Text is { } t ? $"{T("Шрифт")}: {t.SizePercent:0.#} % {T("высоты кадра")}" : $"{T("Ширина")}: {o.Width:0.#}% {T("кадра")}";
         ScheduleCommit();
     }
 
@@ -275,7 +431,7 @@ public sealed partial class MainWindow
             foreach (var item in _overlays)
             {
                 var s = item.Settings;
-                var li = new ListBoxItem { Content = (s.Name.Length > 0 ? s.Name : T("Оверлей")) + (item.ResolvedPath is null ? "  " + T("(файл не выбран)") : ""), Tag = s, Padding = new Thickness(6, 2, 6, 2) };
+                var li = new ListBoxItem { Content = OverlayListLabel(item), Tag = s, Padding = new Thickness(6, 2, 6, 2) };
                 _overlayList.Items.Add(li);
                 if (ReferenceEquals(s, _selectedOverlay)) _overlayList.SelectedItem = li;
             }
@@ -283,6 +439,9 @@ public sealed partial class MainWindow
             var o = _selectedOverlay;
             _overlayEditor.Visibility = o is null ? Visibility.Collapsed : Visibility.Visible;
             if (o is null) return;
+            _overlayFileRow.Visibility = o.IsText ? Visibility.Collapsed : Visibility.Visible;
+            _textEditor.Visibility = o.IsText ? Visibility.Visible : Visibility.Collapsed;
+            if (o.IsText) SyncTextEditor(o);
 
             _overlayFileCombo.Items.Clear();
             var files = OverlayLibraryFiles().ToList();
@@ -371,6 +530,17 @@ public sealed partial class MainWindow
             _filterSliders[key] = (slider, value);
             col.Children.Add(Ui.FormRow(T(name), slider, value));
         }
+        _stabSlider = Ui.Slider(0, Core.Models.Clip.MaxStabilize, 0, v =>
+        {
+            if (_syncing || _current is null) return;
+            _current.Stabilize = (int)Math.Round(v);
+            SyncStabLabel(); RefreshClipList(); UpdateExportInfo(); ScheduleCommit();
+        }, width: 0);
+        _stabSlider.TickFrequency = 1; _stabSlider.IsSnapToTickEnabled = true;
+        _stabSlider.MouseDoubleClick += (_, _) => _stabSlider.Value = 0;
+        _stabValue.TextAlignment = TextAlignment.Right;
+        col.Children.Add(Ui.FormRow(T("Стабилизация"), _stabSlider, _stabValue));
+        col.Children.Add(Ui.Label(T("Стабилизация убирает дрожание камеры при экспорте (два прохода, дольше); на превью не видна."), muted: true, size: Ui.FontCaption));
         var filtersHint = Ui.Label(ColorFilterEffect.Available ? T("Фильтры применяются при воспроизведении. Двойной клик по ползунку — сброс.") : T("Результат виден на паузе; при воспроизведении показывается исходник. Двойной клик по ползунку — сброс."), muted: true, size: Ui.FontCaption);
         col.Children.Add(filtersHint);
         col.Children.Add(Ui.Row(
@@ -406,9 +576,12 @@ public sealed partial class MainWindow
         {
             void Set(string key, int v) { _filterSliders[key].Slider.Value = v; _filterSliders[key].Value.Text = v.ToString(); }
             Set("shadows", f.Shadows); Set("highlights", f.Highlights); Set("saturation", f.Saturation); Set("brightness", f.Brightness); Set("contrast", f.Contrast);
+            _stabSlider.Value = _current.Stabilize; SyncStabLabel();
         }
         finally { _syncing = false; }
     }
+
+    private void SyncStabLabel() => _stabValue.Text = _current is null || _current.Stabilize == 0 ? T("выкл") : _current.Stabilize.ToString();
 
     // ------------------------------------------------------------------ кроп
 
@@ -526,12 +699,60 @@ public sealed partial class MainWindow
             _redactMotionText));
         _redactEditor.Visibility = Visibility.Collapsed;
 
+        _faceStop = Ui.SmallButton(T("Стоп"), () => _faceCts?.Cancel(), T("Остановить поиск лиц"));
+        _faceStop.Visibility = Visibility.Collapsed;
+        var faceRow = Ui.Row(Ui.Label(T("Лица"), muted: true),
+            Ui.SmallButton(T("Найти в кадре"), () => Fire(FindFacesAsync(scan: false)), T("Найти лица в текущем кадре и размыть их")),
+            Ui.SmallButton(T("Найти по ролику"), () => Fire(FindFacesAsync(scan: true)), T("Пройти по активному фрагменту (или всему ролику), найти лица и размыть их с движением")),
+            _faceStop, _faceStatus);
         var content = Ui.Column(
             Ui.Row(_redactToggle, Ui.SmallButton(T("+ Размытие"), () => AddRedaction(RedactMode.Blur)), Ui.SmallButton(T("+ Мозаика"), () => AddRedaction(RedactMode.Pixelate))),
+            faceRow,
             Ui.Label(T("Лица, номера, недопустимый контент. Область можно двигать и растягивать на превью."), muted: true, size: Ui.FontCaption),
             _redactText,
             _redactEditor);
         return Ui.Card(Ui.Column(Ui.Header(T("РЕТУШЬ")), content));
+    }
+
+    /// <summary>Поиск лиц встроенным детектором Windows: один кадр — неподвижные области, проход по ролику — области с движением.</summary>
+    private async Task FindFacesAsync(bool scan)
+    {
+        if (_current is null || _faceCts is not null) return;
+        if (!FaceFinder.Supported) { ShowInfo(T("Поиск лиц недоступен в этой версии Windows."), InfoKind.Warning); return; }
+        Pause();
+        var clip = _current;
+        double from, to, step;
+        if (scan && !clip.Media.IsImage)
+        {
+            var segs = clip.OrderedSegments();
+            var seg = ActiveSegment ?? (segs.Count == 1 ? segs[0] : null);
+            from = seg?.InSec ?? 0; to = seg?.OutSec ?? clip.Media.DurationSec; step = FaceFinder.DefaultStepSec;
+        }
+        else { from = Position; to = Position; step = 0; }
+        _faceCts = new CancellationTokenSource();
+        _faceStop.Visibility = Visibility.Visible;
+        _faceStatus.Text = T("Ищу лица…");
+        try
+        {
+            var progress = new Progress<double>(p => _faceStatus.Text = $"{T("Ищу лица…")} {p * 100:0}%");
+            var found = await Faces.DetectAsync(clip.Media, from, to, step, progress, _faceCts.Token);
+            var regions = FaceFinder.ToRegions(found, step, (double)clip.Media.Width / Math.Max(1, clip.Media.Height), step > 0 ? from : null, step > 0 ? to : null);
+            if (!ReferenceEquals(clip, _current)) return;
+            if (regions.Count == 0) { _faceStatus.Text = T("Лица не найдены"); return; }
+            clip.Redactions.AddRange(regions);
+            _selectedRedaction = regions[0]; _preview.SelectedRedaction = regions[0];
+            SetEditMode(EditMode.Redact);
+            SyncRedactPanel(); UpdateTimelineMarkers(); RefreshClipList(); _preview.Refresh(); CommitNow();
+            _faceStatus.Text = $"{T("Найдено лиц")}: {regions.Count}";
+        }
+        catch (OperationCanceledException) { _faceStatus.Text = T("Поиск остановлен"); }
+        catch (Exception ex)
+        {
+            Logger.Error("Поиск лиц", ex);
+            _faceStatus.Text = "";
+            ShowInfo(T("Поиск лиц не удался: ") + ex.Message, InfoKind.Error);
+        }
+        finally { _faceCts = null; _faceStop.Visibility = Visibility.Collapsed; }
     }
 
     private void SyncEffectLabel()
@@ -604,8 +825,42 @@ public sealed partial class MainWindow
 
     // ------------------------------------------------------------------ запикать
 
+    private readonly System.Windows.Threading.DispatcherTimer _censorMeasureTimer = new() { Interval = TimeSpan.FromMilliseconds(800) };
+    private bool _measuringCensors;
+
+    private static bool NeedsLevel(AudioCensor c) => c.Mode == CensorMode.Beep && !c.LevelIsCurrent && c.ToSec > c.FromSec;
+
+    /// <summary>Громкость дорожки в интервалах «пика» замеряется в фоне: тон ставится на уровень речи, не громче и не тише.</summary>
+    private void ScheduleCensorMeasure()
+    {
+        if (_current is null || !_current.Media.HasAudio || !_current.Censors.Any(NeedsLevel)) return;
+        _censorMeasureTimer.Stop();
+        _censorMeasureTimer.Start();
+    }
+
+    private async Task MeasureCensorLevelsAsync(Clip clip, CancellationToken ct = default)
+    {
+        if (_measuringCensors || !clip.Media.HasAudio || clip.Media.IsImage) return;
+        _measuringCensors = true;
+        try
+        {
+            foreach (var c in clip.Censors.Where(NeedsLevel).ToList())
+            {
+                double f = c.FromSec, t = c.ToSec;
+                var lv = await _s.Probe.MeanVolumeAsync(clip.Media.Path, f, t, ct);
+                if (Math.Abs(c.FromSec - f) > 0.011 || Math.Abs(c.ToSec - t) > 0.011) continue; // интервал успели сдвинуть — замерим заново
+                c.SetLevel(lv ?? AudioCensor.DefaultLevelDb);
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { Logger.Warn("Замер громкости: " + ex.Message); }
+        finally { _measuringCensors = false; }
+        if (ReferenceEquals(clip, _current) && clip.Censors.Any(NeedsLevel)) ScheduleCensorMeasure();
+    }
+
     private UIElement BuildCensorSection()
     {
+        _censorMeasureTimer.Tick += (_, _) => { _censorMeasureTimer.Stop(); if (_current is not null) Fire(MeasureCensorLevelsAsync(_current)); };
         _censorList.SelectionChanged += (_, _) => UpdateTimelineMarkers();
         var modeCombo = new ComboBox { Width = 90, Height = Ui.ControlHeight };
         modeCombo.Items.Add(T("пик")); modeCombo.Items.Add(T("тишина"));
@@ -660,6 +915,7 @@ public sealed partial class MainWindow
     private void UpdateTimelineMarkers()
     {
         ScheduleCommit();
+        ScheduleCensorMeasure();
         if (_timeline.IsDragging) return; // во время перетаскивания границы маркеры не пересоздаём
         _timeline.Markers.Clear();
         if (_current is not null)

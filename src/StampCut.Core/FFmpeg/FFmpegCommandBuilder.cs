@@ -17,7 +17,12 @@ public sealed class BuildResult
     public string ConcatListPath { get; set; } = "";
     public bool StreamCopy { get; set; }
     public QualityPlan Quality { get; set; } = new(20, null);
+    /// <summary>Подготовительные проходы (анализ стабилизации): выполняются до основного, по порядку.</summary>
+    public List<PrePass> PrePasses { get; } = new();
 }
+
+/// <summary>Отдельный запуск ffmpeg перед экспортом. OutputFile — временный файл, который надо удалить после экспорта.</summary>
+public sealed record PrePass(List<string> Args, string OutputFile, double DurationSec, string Title);
 
 /// <summary>Что решили по качеству: CRF/CQ и потолок битрейта (бит/с), если он нужен.</summary>
 public sealed record QualityPlan(int Crf, long? MaxRateBps);
@@ -44,6 +49,8 @@ public static class FFmpegCommandBuilder
             if (job.Clips.Any(c => c.Crop is { IsFull: false })) errors.Add(Loc.T("Кроп невозможен без перекодирования: выберите другой пресет экспорта."));
             if (job.Clips.Any(c => c.Redactions.Count > 0)) errors.Add(Loc.T("Ретушь невозможна без перекодирования: выберите другой пресет экспорта."));
             if (job.Clips.Any(c => c.Censors.Count > 0)) errors.Add(Loc.T("«Запикивание» невозможно без перекодирования: выберите другой пресет экспорта."));
+            if (job.Clips.Any(c => c.Stabilize > 0)) errors.Add(Loc.T("Стабилизация невозможна без перекодирования: выберите другой пресет экспорта."));
+            if (job.EffectiveTransitionSec > 0) errors.Add(Loc.T("Переходы невозможны без перекодирования: выберите другой пресет экспорта."));
             if (job.Clips.Count > 1 && !AreCopyCompatible(job.Clips, out var why))
                 errors.Add(Loc.T("Склейка без перекодирования невозможна: ") + why + Loc.T(" Выберите пресет с перекодированием."));
         }
@@ -188,19 +195,43 @@ public static class FFmpegCommandBuilder
             overlayInputIndex[j] = inputIndex++;
         }
 
+        // --- стабилизация: проход анализа на каждый дрожащий фрагмент
+        var stabFiles = PlanStabilization(job, parts, r);
+
         // --- граф фильтров
         var g = new StringBuilder();
         for (int i = 0; i < n; i++)
         {
             var (c, seg) = parts[i];
-            string label = BuildClipChain(g, c, seg, i, outW, outH, r.OutputFps, p, isFirst: ReferenceEquals(c, job.Clips[0]));
+            string label = BuildClipChain(g, c, seg, i, outW, outH, r.OutputFps, p, isFirst: ReferenceEquals(c, job.Clips[0]), stabFiles[i]);
             g.Append($"[{label}]setsar=1[v{i}];");
             if (anyAudio)
                 BuildAudioChain(g, c, seg, i, audioInputIndex[i], beepInputIndex[i], p);
         }
 
         string v = "v0", au = "a0";
-        if (n > 1)
+        double tr = job.EffectiveTransitionSec;
+        if (n > 1 && tr > 0)
+        {
+            // переходы: xfade по видео и acrossfade по звуку; смещение каждого — конец накопленной ленты минус длительность перехода
+            string kind = ExportJob.Transitions.Contains(job.Transition) ? job.Transition : "fade";
+            double acc = parts[0].Segment.DurationSec;
+            string pv = "v0", pa = "a0";
+            for (int i = 1; i < n; i++)
+            {
+                double offset = acc - tr;
+                g.Append($"[{pv}][v{i}]xfade=transition={kind}:duration={Num(tr)}:offset={Num(offset)}[x{i}];");
+                pv = $"x{i}";
+                if (anyAudio)
+                {
+                    g.Append($"[{pa}][a{i}]acrossfade=d={Num(tr)}:c1=tri:c2=tri[y{i}];");
+                    pa = $"y{i}";
+                }
+                acc = offset + parts[i].Segment.DurationSec;
+            }
+            v = pv; au = pa;
+        }
+        else if (n > 1)
         {
             for (int i = 0; i < n; i++) g.Append($"[v{i}]").Append(anyAudio ? $"[a{i}]" : "");
             g.Append($"concat=n={n}:v=1:a={(anyAudio ? 1 : 0)}[vc]").Append(anyAudio ? "[ac]" : "").Append(';');
@@ -257,7 +288,7 @@ public static class FFmpegCommandBuilder
         var af = new List<string> { $"aresample={p.SampleRate}", "aformat=sample_fmts=fltp:channel_layouts=stereo" };
         if (Math.Abs(c.AudioGainDb) >= 0.05) af.Add($"volume={Num(Math.Clamp(c.AudioGainDb, Clip.MuteDb, Clip.MaxGainDb))}dB");
         var segments = (c.Media.HasAudio ? c.Censors : new List<AudioCensor>()).Where(x => x.ToSec > x.FromSec)
-            .Select(x => (From: Math.Max(0, x.FromSec - seg.InSec), To: Math.Max(0, Math.Min(x.ToSec, seg.OutSec) - seg.InSec), x.Mode))
+            .Select(x => (From: Math.Max(0, x.FromSec - seg.InSec), To: Math.Max(0, Math.Min(x.ToSec, seg.OutSec) - seg.InSec), x.Mode, Level: x.EffectiveLevelDb))
             .Where(x => x.To > x.From).ToList();
         if (segments.Count == 0)
         {
@@ -271,21 +302,25 @@ public static class FFmpegCommandBuilder
             g.Append($"[{audioInput}:a:0]{string.Join(",", af)}[a{i}];");
             return;
         }
+        // тон — на уровне самой дорожки в этом месте (замер RMS) с учётом поправки громкости ролика: не громче и не тише речи
         var beeps = segments.Where(x => x.Mode == CensorMode.Beep).ToList();
-        string beepExpr = string.Join("+", beeps.Select(x => $"between(t,{Num(x.From)},{Num(x.To)})"));
+        double gain = Math.Clamp(c.AudioGainDb, Clip.MuteDb, Clip.MaxGainDb);
+        string beepExpr = string.Join("+", beeps.Select(x => $"if(between(t,{Num(x.From)},{Num(x.To)}),{Num(Math.Round(AudioCensor.ToneAmplitude(x.Level + gain), 4))},0)"));
         g.Append($"[{audioInput}:a:0]{string.Join(",", af)}[a{i}_src];");
-        g.Append($"[{beepInput}:a:0]aformat=sample_fmts=fltp:channel_layouts=stereo,volume=volume='if({beepExpr},0.25,0)':eval=frame[a{i}_beep];");
+        g.Append($"[{beepInput}:a:0]aformat=sample_fmts=fltp:channel_layouts=stereo,volume=volume='{beepExpr}':eval=frame[a{i}_beep];");
         g.Append($"[a{i}_src][a{i}_beep]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a{i}];");
     }
 
     /// <summary>Цепочка одного ролика: тонмэппинг → формат → ретушь → кроп → вписывание → fps. Возвращает метку результата.</summary>
-    private static string BuildClipChain(StringBuilder g, Clip c, Segment seg, int i, int outW, int outH, int fps, ExportPreset p, bool isFirst)
+    private static string BuildClipChain(StringBuilder g, Clip c, Segment seg, int i, int outW, int outH, int fps, ExportPreset p, bool isFirst, string? stabFile = null)
     {
         var m = c.Media;
         var chain = new List<string>();
         if (m.IsHdr && p.HdrToSdr)
             chain.Add("zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv");
         chain.Add("format=yuv420p");
+        if (stabFile is not null)
+            chain.Add($"vidstabtransform=input={EscapeFilterPath(stabFile)}:smoothing={Math.Clamp(c.Stabilize, 1, Clip.MaxStabilize) * 10}:optzoom=1:interpol=bilinear");
         chain.AddRange(c.Filters.ToFfmpeg());
         string cur = $"c{i}_0";
         g.Append($"[{i}:v:0]{string.Join(",", chain)}[{cur}];");
@@ -423,6 +458,33 @@ public static class FFmpegCommandBuilder
         int best = job.Clips.Where(c => !c.Media.IsImage).Select(c => (int)Math.Round(c.Media.Fps > 0 ? c.Media.Fps : 30)).DefaultIfEmpty(30).Max();
         return Math.Min(max, Math.Max(1, best));
     }
+
+    /// <summary>
+    /// Стабилизация — два прохода: vidstabdetect пишет файл векторов движения (.trf) для фрагмента, затем vidstabtransform
+    /// в основной цепочке его читает. Возвращает путь к .trf на каждый фрагмент (null — фрагмент не стабилизируется).
+    /// </summary>
+    private static string?[] PlanStabilization(ExportJob job, List<(Clip Clip, Segment Segment)> parts, BuildResult r)
+    {
+        var files = new string?[parts.Count];
+        string tempDir = string.IsNullOrEmpty(job.TempDir) ? Path.GetTempPath() : job.TempDir;
+        for (int i = 0; i < parts.Count; i++)
+        {
+            var (c, seg) = parts[i];
+            if (c.Stabilize <= 0 || c.Media.IsImage) continue;
+            var file = Path.Combine(tempDir, $"stab-{i}-{Guid.NewGuid():N}.trf").Replace('\\', '/');
+            files[i] = file;
+            var a = new List<string> { "-hide_banner", "-y", "-nostats", "-loglevel", "error", "-progress", "pipe:1" };
+            if (!string.IsNullOrEmpty(job.HwAccel)) a.AddRange(new[] { "-hwaccel", job.HwAccel });
+            AddTrim(a, c, seg);
+            a.AddRange(new[] { "-i", c.Media.Path, "-vf", $"vidstabdetect=shakiness={Math.Clamp(c.Stabilize, 1, Clip.MaxStabilize)}:accuracy=15:result={EscapeFilterPath(file)}", "-an", "-f", "null", "-" });
+            r.PrePasses.Add(new PrePass(a, file, seg.DurationSec, $"{Loc.T("Анализ стабилизации")}: {c.FileName}"));
+        }
+        return files;
+    }
+
+    /// <summary>Путь внутри параметра фильтра: в одинарных кавычках, «:» экранируется для разборщика опций, апостроф — через выход из кавычек.</summary>
+    public static string EscapeFilterPath(string path)
+        => "'" + path.Replace('\\', '/').Replace(":", "\\:").Replace("'", "'\\\\\\''") + "'";
 
     private static void AddTrim(List<string> a, Clip c, Segment seg)
     {

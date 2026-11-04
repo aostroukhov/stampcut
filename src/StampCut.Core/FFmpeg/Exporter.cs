@@ -42,7 +42,8 @@ public sealed class Exporter
         var tempJob = new ExportJob
         {
             Clips = job.Clips, Overlays = job.Overlays, Preset = job.Preset,
-            OutputPath = tempPath, Encoder = job.Encoder, HwAccel = job.HwAccel,
+            OutputPath = tempPath, Encoder = job.Encoder, HwAccel = job.HwAccel, NormalizeLoudness = job.NormalizeLoudness,
+            TransitionSec = job.TransitionSec, Transition = job.Transition, TempDir = job.TempDir,
         };
         BuildResult build;
         try { build = FFmpegCommandBuilder.Build(tempJob); }
@@ -53,7 +54,31 @@ public sealed class Exporter
         {
             if (build.ConcatList is not null) await File.WriteAllTextAsync(build.ConcatListPath, build.ConcatList, ct).ConfigureAwait(false);
             var runner = new FFmpegRunner(_paths);
-            var result = await runner.RunAsync(build.Args, job.TotalDurationSec, progress, ct, log).ConfigureAwait(false);
+            // подготовительные проходы (анализ стабилизации): общий прогресс делится по длительности, анализ считаем вдвое дешевле кодирования
+            double mainWeight = Math.Max(0.1, job.TotalDurationSec);
+            double preWeight = build.PrePasses.Sum(x => Math.Max(0.1, x.DurationSec)) * 0.5;
+            double totalWeight = mainWeight + preWeight, doneWeight = 0;
+            var started = System.Diagnostics.Stopwatch.StartNew();
+            IProgress<ExportProgress> Scaled(double weight) => new Progress<ExportProgress>(pr =>
+            {
+                double frac = Math.Clamp((doneWeight + pr.Fraction * weight) / totalWeight, 0, 1);
+                TimeSpan? remaining = frac > 0.02 ? TimeSpan.FromSeconds(started.Elapsed.TotalSeconds * (1 - frac) / frac) : null;
+                progress?.Report(new ExportProgress(frac, pr.Speed, started.Elapsed, remaining, pr.OutTimeSec));
+            });
+            foreach (var pre in build.PrePasses)
+            {
+                if (!string.IsNullOrEmpty(job.TempDir)) Directory.CreateDirectory(job.TempDir);
+                log?.Invoke(pre.Title);
+                double w = Math.Max(0.1, pre.DurationSec) * 0.5;
+                var preResult = await runner.RunAsync(pre.Args, pre.DurationSec, progress is null ? null : Scaled(w), ct, log).ConfigureAwait(false);
+                if (!preResult.Success || !File.Exists(pre.OutputFile))
+                {
+                    TryDelete(tempPath);
+                    return new ExportOutcome(false, null, Loc.T("Анализ стабилизации не удался:") + "\n" + MediaProbe.Tail(preResult.StdErr, 8), preResult.Elapsed, CommandLine.Render(_paths.Ffmpeg, pre.Args));
+                }
+                doneWeight += w;
+            }
+            var result = await runner.RunAsync(build.Args, job.TotalDurationSec, progress is null || build.PrePasses.Count == 0 ? progress : Scaled(mainWeight), ct, log).ConfigureAwait(false);
             if (!result.Success)
             {
                 TryDelete(tempPath);
@@ -77,6 +102,7 @@ public sealed class Exporter
         finally
         {
             if (build.ConcatList is not null) TryDelete(build.ConcatListPath);
+            foreach (var pre in build.PrePasses) TryDelete(pre.OutputFile);
         }
     }
 

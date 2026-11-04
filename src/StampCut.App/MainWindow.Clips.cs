@@ -25,15 +25,24 @@ public sealed partial class MainWindow
     private UIElement BuildClipsPanel()
     {
         var grid = new Grid { Margin = new Thickness(10, 0, 4, 0) };
-        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(3, GridUnitType.Star) });
+        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star), MinHeight = 140 });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(2, GridUnitType.Star), MinHeight = 120 });
+        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star), MinHeight = 200 });
 
-        // ИМПОРТ
+        // МЕДИА: импорт файлов и список роликов (как Media Pool / Project panel)
         var importDock = new DockPanel();
-        var header = Ui.Header(T("ИМПОРТ"));
+        var header = Ui.Header(T("МЕДИА"));
         DockPanel.SetDock(header, Dock.Top);
         importDock.Children.Add(header);
+        var recentButton = Ui.SmallButton(T("Недавние ▾"), () => { }, T("Недавние файлы и папки"));
+        recentButton.Click += (_, _) => ShowRecentMenu(recentButton);
+        var importRow = Ui.Row(
+            Ui.SmallButton(T("Открыть…"), () => OpenFiles(replace: true), T("Открыть видео — новая сессия (Ctrl+O)")),
+            Ui.SmallButton(T("+ Добавить"), () => OpenFiles(replace: false), T("Добавить ролик или фото в конец склейки")),
+            recentButton);
+        importRow.Margin = new Thickness(0, 0, 0, 4);
+        DockPanel.SetDock(importRow, Dock.Top);
+        importDock.Children.Add(importRow);
         var buttons = Ui.Row(
             Ui.SmallButton("▲", () => MoveClip(-1), T("Выше")),
             Ui.SmallButton("▼", () => MoveClip(1), T("Ниже")),
@@ -60,12 +69,15 @@ public sealed partial class MainWindow
         var splitter = new GridSplitter { Height = 6, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Center, Background = Brushes.Transparent, ShowsPreview = false, Focusable = false };
         Grid.SetRow(splitter, 1); grid.Children.Add(splitter);
 
-        // ЭКСПОРТ: прогресс и история
+        // ЭКСПОРТ: настройки, кнопка, прогресс и история готовых файлов — всё в одном месте
         var exportDock = new DockPanel();
         var eh = Ui.Header(T("ЭКСПОРТ"));
         DockPanel.SetDock(eh, Dock.Top); exportDock.Children.Add(eh);
-        var progressRow = Ui.Column(_exportProgress, Ui.Row(_exportStatus, _cancelButton));
-        DockPanel.SetDock(progressRow, Dock.Top); exportDock.Children.Add(progressRow);
+        var controls = BuildExportControls();
+        DockPanel.SetDock(controls, Dock.Top); exportDock.Children.Add(controls);
+        var historyHeader = Ui.Label(T("Готовые файлы"), muted: true, size: Ui.FontCaption);
+        historyHeader.Margin = new Thickness(0, 6, 0, 2);
+        DockPanel.SetDock(historyHeader, Dock.Top); exportDock.Children.Add(historyHeader);
         var hb = Ui.Row(
             Ui.SmallButton("📁", () => { if (SelectedHistory is { } h) RevealInExplorer(h.Path); }, T("Показать в проводнике")),
             Ui.SmallButton("▶", () => { if (SelectedHistory is { } h) TryStart(h.Path); }, T("Открыть файл")),
@@ -94,9 +106,26 @@ public sealed partial class MainWindow
             if (!exists) name.Opacity = 0.5;
             text.Children.Add(name);
             text.Children.Add(Ui.Label($"{r.At:dd.MM HH:mm} · {TimeFormat.Format(r.DurationSec, false)} · {TimeFormat.FormatSize(r.SizeBytes)}" + (exists ? "" : $" · {T("файла нет")}"), muted: true, size: Ui.FontCaption));
-            _historyList.Items.Add(new ListBoxItem { Content = text, Tag = r, Padding = new Thickness(8, 4, 8, 4), ToolTip = r.Path });
+            var li = new ListBoxItem { Content = text, Tag = r, Padding = new Thickness(8, 4, 8, 4), ToolTip = r.Path };
+            var rec = r;
+            li.ContextMenu = FileContextMenu(() => rec.Path, T("Удалить файл и запись"), () => { li.IsSelected = true; DeleteHistoryItem(); });
+            li.ContextMenuOpening += (_, _) => { li.IsSelected = true; };
+            _historyList.Items.Add(li);
         }
         _historyButtons.IsEnabled = _historyList.Items.Count > 0;
+    }
+
+    /// <summary>Меню по правой кнопке для элемента списка с файлом: удалить, открыть, показать в папке, скопировать путь.</summary>
+    private ContextMenu FileContextMenu(Func<string?> path, string deleteText, Action delete)
+    {
+        var menu = new ContextMenu();
+        void Add(string text, Action action) { var mi = new MenuItem { Header = text }; mi.Click += (_, _) => action(); menu.Items.Add(mi); }
+        Add(T("Открыть"), () => { if (path() is { } p && File.Exists(p)) TryStart(p); });
+        Add(T("Показать в папке"), () => { if (path() is { } p && File.Exists(p)) RevealInExplorer(p); });
+        Add(T("Скопировать путь"), () => { if (path() is { } p) { try { Clipboard.SetText(p); _statusInfo.Text = T("Путь скопирован"); } catch { } } });
+        menu.Items.Add(new Separator());
+        Add(deleteText, delete);
+        return menu;
     }
 
     private void DeleteHistoryItem()
@@ -123,8 +152,11 @@ public sealed partial class MainWindow
             var info = segs.Count == 1 ? $"{TimeFormat.Format(segs[0].InSec, false)}–{TimeFormat.Format(segs[0].OutSec, false)}" : $"{segs.Count} {T("фрагм.")} {TimeFormat.Format(c.DurationSec, false)}";
             text.Children.Add(Ui.Label($"{info} · {c.Media.Width}×{c.Media.Height}" +
                                        (c.Crop is { IsFull: false } ? $" · {T("кроп")}" : "") + (c.Redactions.Count > 0 ? $" · {T("ретушь")} {c.Redactions.Count}" : "") + (c.Censors.Count > 0 ? $" · {T("пик")} {c.Censors.Count}" : "")
-                                       + (c.IsMuted ? $" · {T("без звука")}" : "") + (!c.Filters.IsDefault ? $" · {T("фильтры")}" : ""), muted: true, size: Ui.FontCaption));
+                                       + (c.IsMuted ? $" · {T("без звука")}" : "") + (!c.Filters.IsDefault ? $" · {T("фильтры")}" : "") + (c.Stabilize > 0 ? $" · {T("стаб.")}" : ""), muted: true, size: Ui.FontCaption));
             var item = new ListBoxItem { Content = text, Tag = c, Padding = new Thickness(8, 6, 8, 6), ToolTip = c.Media.Path };
+            var clip = c;
+            item.ContextMenu = FileContextMenu(() => clip.Media.Path, T("Убрать из проекта"), () => { if (ReferenceEquals(clip, _current)) RemoveClip(); });
+            item.ContextMenuOpening += (_, _) => { item.IsSelected = true; };
             _clipList.Items.Add(item);
             if (ReferenceEquals(c, _current)) _clipList.SelectedItem = item;
         }
@@ -324,7 +356,9 @@ public sealed partial class MainWindow
         if (_clips.Count == 0 || _current is null) return;
         var job = new ExportJob { Clips = _clips, Preset = _preset, OutputPath = "x", Encoder = HardwareEncoder.None };
         var (w, h) = _preset.StreamCopy ? (_current.Media.Width, _current.Media.Height) : Core.FFmpeg.FFmpegCommandBuilder.ComputeOutputSize(job);
+        bool sizeChanged = w != _preview.OutputWidth || h != _preview.OutputHeight;
         _preview.OutputWidth = w; _preview.OutputHeight = h;
+        if (sizeChanged && rebuild) RefreshTextOverlays(); // плашки рисуются под размер выходного кадра
         bool isFirst = ReferenceEquals(_clips[0], _current);
         _preview.Fit = _preset.StreamCopy ? FitMode.Keep : (_preset.HasFixedSize ? _preset.Fit : (isFirst ? FitMode.Keep : FitMode.PadBlack));
         if (rebuild) _preview.Refresh(); else _preview.Layout(); // во время перетаскивания слой перестраивать нельзя
