@@ -201,6 +201,7 @@ public sealed partial class MainWindow
             if (item.ResolvedPath is null || item.PngWidth == 0) continue;
             resolved.Add(new ResolvedOverlay { Settings = item.Settings, Path = item.ResolvedPath, Width = item.PngWidth, Height = item.PngHeight });
         }
+        if (_preset.StreamCopy && _overlays.Any(o => o.Settings.IsText)) { ShowInfo(T("Оверлей невозможен без перекодирования: выберите другой пресет экспорта."), InfoKind.Error); return; }
         if (_overlays.Count > resolved.Count && !_preset.StreamCopy) ShowInfo(T("У части оверлеев не выбран PNG-файл — они пропущены."), InfoKind.Warning);
 
         Autosave("export");

@@ -215,6 +215,7 @@ public static class Program
         if (dryRun)
         {
             var b = FFmpegCommandBuilder.Build(job);
+            foreach (var pre in b.PrePasses) Console.WriteLine("--- " + pre.Title + "\n" + CommandLine.Render(paths.Ffmpeg, pre.Args));
             Console.WriteLine(CommandLine.Render(paths.Ffmpeg, b.Args));
             if (b.ConcatList is not null) Console.WriteLine("--- " + b.ConcatListPath + "\n" + b.ConcatList);
             Console.WriteLine($"--- выход {b.OutputWidth}×{b.OutputHeight}, fps={(b.OutputFps == 0 ? "исходная" : b.OutputFps)}, crf={b.Quality.Crf}, maxrate={(b.Quality.MaxRateBps is { } mr ? mr / 1000 + "k" : "нет")}");

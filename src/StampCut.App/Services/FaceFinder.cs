@@ -34,7 +34,8 @@ public sealed class FaceFinder
     /// <summary>Кадры с fromSec по toSec с шагом stepSec (stepSec ≤ 0 — один кадр в fromSec). Прогресс — доля обработанных кадров.</summary>
     public async Task<List<Found>> DetectAsync(MediaInfo media, double fromSec, double toSec, double stepSec, IProgress<double>? progress, CancellationToken ct)
     {
-        int w = Math.Min(FrameWidth, Math.Max(32, media.Width)); w -= w % 2;
+        // кадр всегда 512 px шириной (кратно 64): строка буфера SoftwareBitmap без выравнивающих отступов совпадает с сырым кадром ffmpeg
+        int w = FrameWidth;
         int h = Math.Max(32, (int)Math.Round((double)w * media.Height / Math.Max(1, media.Width))); h -= h % 2;
         bool single = stepSec <= 0 || media.IsImage;
 

@@ -315,7 +315,7 @@ public sealed class OverlayPresetFile
     {
         Id = o.Id, Name = o.Name, File = o.File, Anchor = AnchorName(o.Anchor),
         Offset = new OffsetSection { X = o.OffsetX, Y = o.OffsetY, Unit = o.OffsetUnit == OffsetUnit.Pixels ? "px" : "percent" },
-        Size = new SizeSection { Width = o.Width, Unit = o.WidthUnit == SizeUnit.Pixels ? "px" : "percentOfVideoWidth" },
+        Size = o.IsText ? null : new SizeSection { Width = o.Width, Unit = o.WidthUnit == SizeUnit.Pixels ? "px" : "percentOfVideoWidth" }, // ширина плашки выводится из шрифта и размера кадра
         Opacity = o.Opacity,
         TimeRange = o.FromSec is not null || o.ToSec is not null ? new TimeRangeSection { FromSec = o.FromSec ?? 0, ToSec = o.ToSec ?? 0 } : null,
         FadeInSec = o.FadeInSec, FadeOutSec = o.FadeOutSec,

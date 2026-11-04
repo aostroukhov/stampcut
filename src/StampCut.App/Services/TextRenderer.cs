@@ -28,11 +28,9 @@ public static class TextRenderer
 
         var ft = new FormattedText(text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, typeface, fontPx, new SolidColorBrush(fg), 1.0)
         { TextAlignment = align, Trimming = TextTrimming.None };
-        if (ft.Width > maxTextW)
-        {
-            ft.MaxTextWidth = maxTextW;      // перенос по словам
-            ft.MaxTextWidth = Math.Min(maxTextW, ft.Width + 1); // и ужать блок до самой длинной строки, чтобы выравнивание работало в тесной рамке
-        }
+        if (ft.Width > maxTextW) ft.MaxTextWidth = maxTextW; // перенос по словам
+        // ширина абзаца всегда равна самой длинной строке: без неё WPF выравнивает «по центру»/«справа» относительно нуля и текст уходит за край
+        ft.MaxTextWidth = Math.Min(maxTextW, ft.Width + 1);
         double textW = Math.Ceiling(Math.Max(1, ft.Width)), textH = Math.Ceiling(Math.Max(1, ft.Height));
         int w = (int)Math.Ceiling(textW + 2 * pad), h = (int)Math.Ceiling(textH + 2 * pad);
         w = Math.Clamp(w, 2, Math.Max(2, outW * 2)); h = Math.Clamp(h, 2, Math.Max(2, outH * 2));
@@ -52,7 +50,7 @@ public static class TextRenderer
             {
                 // без подложки и обводки — мягкая тень, чтобы текст читался на любом фоне
                 var shadow = new FormattedText(text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, typeface, fontPx, new SolidColorBrush(Color.FromArgb(0xA0, 0, 0, 0)), 1.0)
-                { TextAlignment = align, Trimming = TextTrimming.None, MaxTextWidth = ft.MaxTextWidth > 0 ? ft.MaxTextWidth : double.PositiveInfinity };
+                { TextAlignment = align, Trimming = TextTrimming.None, MaxTextWidth = ft.MaxTextWidth };
                 double d = Math.Max(1, fontPx * 0.04);
                 dc.DrawText(shadow, new Point(origin.X + d, origin.Y + d));
             }

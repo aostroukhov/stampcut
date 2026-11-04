@@ -855,6 +855,8 @@ public sealed partial class MainWindow
         catch (OperationCanceledException) { }
         catch (Exception ex) { Logger.Warn("Замер громкости: " + ex.Message); }
         finally { _measuringCensors = false; }
+        // замер — служебные данные: он не делает проект несохранённым и не становится шагом Undo
+        CommitNow(); _history.Amend(Snapshot()); UpdateDirtyTitle();
         if (ReferenceEquals(clip, _current) && clip.Censors.Any(NeedsLevel)) ScheduleCensorMeasure();
     }
 

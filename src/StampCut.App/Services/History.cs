@@ -45,6 +45,15 @@ public sealed class History
 
     public void MarkSaved() => _savedJson = Current ?? "";
 
+    /// <summary>Заменить текущий снимок без нового шага (служебные данные вроде замера громкости): признак «сохранено» не меняется.</summary>
+    public void Amend(ProjectFile pf)
+    {
+        if (_undo.Count == 0) { Capture(pf); return; }
+        var json = ProjectStore.Serialize(pf);
+        if (_undo[^1] == _savedJson) _savedJson = json;
+        _undo[^1] = json;
+    }
+
     public void Reset(ProjectFile pf, bool saved)
     {
         _undo.Clear(); _redo.Clear();
