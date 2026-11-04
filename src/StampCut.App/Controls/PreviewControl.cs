@@ -40,7 +40,6 @@ public sealed class PreviewControl : Grid
         Background = new SolidColorBrush(Color.FromArgb(160, 0, 0, 0)), Padding = new Thickness(14, 8, 14, 8), Visibility = Visibility.Collapsed, TextAlignment = TextAlignment.Center,
     };
 
-    // --- модель
     public int VideoWidth { get; private set; }
     public int VideoHeight { get; private set; }
     public Clip? CurrentClip { get; set; }
@@ -48,11 +47,9 @@ public sealed class PreviewControl : Grid
     public OverlaySettings? SelectedOverlay { get; set; }
     public RedactRegion? SelectedRedaction { get; set; }
     public EditMode Mode { get; private set; } = EditMode.View;
-    /// <summary>Размер выходного кадра и способ вписывания текущего ролика в него (для WYSIWYG оверлея).</summary>
     public int OutputWidth { get; set; }
     public int OutputHeight { get; set; }
     public FitMode Fit { get; set; } = FitMode.Keep;
-    /// <summary>Фиксированное соотношение сторон кропа (w/h) или null — свободно.</summary>
     public double? CropAspect { get; set; }
     /// <summary>Позиция в секундах исходника (для интервалов ретуши).</summary>
     public double CurrentTimeSec { get; set; }
@@ -65,7 +62,7 @@ public sealed class PreviewControl : Grid
     public event Action<RedactRegion>? RedactionChanged;
     public event Action<RedactRegion?>? RedactionSelected;
 
-    private double _scale = 1; // экранных px на 1 px исходника
+    private double _scale = 1;
     private readonly List<Action> _layouters = new();
 
     public PreviewControl()
@@ -86,31 +83,11 @@ public sealed class PreviewControl : Grid
         };
     }
 
-    public void SetVideoSize(int w, int h)
-    {
-        VideoWidth = Math.Max(1, w); VideoHeight = Math.Max(1, h);
-        Layout();
-    }
-
-    public void SetMode(EditMode mode)
-    {
-        Mode = mode;
-        Refresh();
-    }
-
-    public void ShowPoster(BitmapSource? image)
-    {
-        _poster.Source = image;
-        _poster.Visibility = image is null ? Visibility.Collapsed : Visibility.Visible;
-    }
-
+    public void SetVideoSize(int w, int h) { VideoWidth = Math.Max(1, w); VideoHeight = Math.Max(1, h); Layout(); }
+    public void SetMode(EditMode mode) { Mode = mode; Refresh(); }
+    public void ShowPoster(BitmapSource? image) { _poster.Source = image; _poster.Visibility = image is null ? Visibility.Collapsed : Visibility.Visible; }
     public void HidePoster() => _poster.Visibility = Visibility.Collapsed;
-
-    public void ShowMessage(string? text)
-    {
-        _message.Text = text ?? "";
-        _message.Visibility = string.IsNullOrEmpty(text) ? Visibility.Collapsed : Visibility.Visible;
-    }
+    public void ShowMessage(string? text) { _message.Text = text ?? ""; _message.Visibility = string.IsNullOrEmpty(text) ? Visibility.Collapsed : Visibility.Visible; }
 
     // ------------------------------------------------------------ геометрия
 
@@ -123,7 +100,6 @@ public sealed class PreviewControl : Grid
         return new Rect((cw - vw) / 2, (ch - vh) / 2, vw, vh);
     }
 
-    /// <summary>Прямоугольник кропа в пикселях исходника.</summary>
     private Rect CropRectPx()
     {
         if (CurrentClip?.Crop is { IsFull: false } c)
@@ -156,7 +132,6 @@ public sealed class PreviewControl : Grid
         _layer.Children.Clear();
         _layouters.Clear();
         if (VideoWidth <= 0 || CurrentClip is null) { Layout(); return; }
-
         BuildMask();
         BuildRedactions();
         BuildOverlays();
@@ -184,7 +159,6 @@ public sealed class PreviewControl : Grid
         {
             var area = ToScreen(Mode == EditMode.Crop ? CropRectPx() : OutputFramePx());
             double W = _layer.Width, H = _layer.Height;
-            // четыре прямоугольника вокруг области
             Place(rects[0], 0, 0, W, Math.Max(0, area.Y));
             Place(rects[1], 0, area.Bottom, W, Math.Max(0, H - area.Bottom));
             Place(rects[2], 0, area.Y, Math.Max(0, area.X), area.Height);
@@ -194,6 +168,8 @@ public sealed class PreviewControl : Grid
         });
     }
 
+    // ------------------------------------------------------------ оверлеи: перетаскивание и 8 рукояток
+
     private void BuildOverlays()
     {
         foreach (var item in Overlays)
@@ -202,28 +178,56 @@ public sealed class PreviewControl : Grid
             var img = new Image { Source = item.Image, Stretch = Stretch.Fill, Opacity = s.Opacity, IsHitTestVisible = false };
             var border = new Rectangle { Stroke = Ui.Accent, StrokeThickness = 1.5, IsHitTestVisible = false, Visibility = Visibility.Collapsed };
             var move = Ui.TransparentThumb();
-            var resize = Ui.Handle(10, Cursors.SizeNWSE, Ui.Accent);
             move.ToolTip = s.Name.Length > 0 ? s.Name : "Оверлей";
-            _layer.Children.Add(img); _layer.Children.Add(border); _layer.Children.Add(move); _layer.Children.Add(resize);
-            bool visibleNow = true;
+            _layer.Children.Add(img); _layer.Children.Add(border); _layer.Children.Add(move);
+
+            // рукоятки: 4 угла + 4 стороны; (dx, dy) — какую сторону тянет: -1 левая/верхняя, +1 правая/нижняя, 0 — не меняет
+            var handles = new List<(Thumb T, int Dx, int Dy)>();
+            foreach (var (dx, dy, cur) in new[]
+            {
+                (-1, -1, Cursors.SizeNWSE), (1, -1, Cursors.SizeNESW), (-1, 1, Cursors.SizeNESW), (1, 1, Cursors.SizeNWSE),
+                (0, -1, Cursors.SizeNS), (0, 1, Cursors.SizeNS), (-1, 0, Cursors.SizeWE), (1, 0, Cursors.SizeWE),
+            })
+            {
+                var t = Ui.Handle(11, cur, Ui.Accent);
+                t.Visibility = Visibility.Collapsed;
+                _layer.Children.Add(t);
+                handles.Add((t, dx, dy));
+            }
 
             Rect RectOut() => RectToRect(OverlayGeometry.Compute(OutputWidth, OutputHeight, s, item.PngWidth, item.PngHeight));
+            double K() => OutputFramePx().Width / Math.Max(1, OutputWidth); // px исходника на 1 px выхода
+            void Apply(double x, double y, double w)
+            {
+                double aspect = item.PngWidth > 0 ? (double)item.PngHeight / item.PngWidth : 1;
+                w = Math.Clamp(w, 8, OutputWidth);
+                double h = w * aspect;
+                if (h > OutputHeight) { h = OutputHeight; w = h / aspect; }
+                x = Math.Clamp(x, 0, OutputWidth - w);
+                y = Math.Clamp(y, 0, OutputHeight - h);
+                OverlayGeometry.ApplyPosition(OutputWidth, OutputHeight, s, item.PngWidth, item.PngHeight, x, y, w);
+                OverlayChanged?.Invoke(s); Layout();
+            }
             void LayoutItem()
             {
                 var frame = OutputFramePx();
-                double k = frame.Width / Math.Max(1, OutputWidth); // px исходника на 1 px выхода
+                double k = K();
                 var r = RectOut();
-                var px = new Rect(frame.X + r.X * k, frame.Y + r.Y * k, r.Width * k, r.Height * k);
-                var sc = ToScreen(px);
-                visibleNow = s.FromSec is null && s.ToSec is null || (OutputTimeSec >= (s.FromSec ?? 0) && OutputTimeSec <= (s.ToSec ?? double.MaxValue));
+                var sc = ToScreen(new Rect(frame.X + r.X * k, frame.Y + r.Y * k, r.Width * k, r.Height * k));
+                bool visibleNow = s.FromSec is null && s.ToSec is null || (OutputTimeSec >= (s.FromSec ?? 0) && OutputTimeSec <= (s.ToSec ?? double.MaxValue));
                 img.Opacity = s.Opacity * (visibleNow ? 1 : 0.25);
                 Place(img, sc.X, sc.Y, sc.Width, sc.Height);
                 Place(move, sc.X, sc.Y, sc.Width, sc.Height);
                 bool selected = ReferenceEquals(SelectedOverlay, s) && Mode == EditMode.View;
                 border.Visibility = selected ? Visibility.Visible : Visibility.Collapsed;
-                resize.Visibility = selected ? Visibility.Visible : Visibility.Collapsed;
                 Place(border, sc.X, sc.Y, sc.Width, sc.Height);
-                Canvas.SetLeft(resize, sc.Right - 5); Canvas.SetTop(resize, sc.Bottom - 5);
+                foreach (var (t, dx, dy) in handles)
+                {
+                    t.Visibility = selected ? Visibility.Visible : Visibility.Collapsed;
+                    double hx = dx switch { -1 => sc.X, 0 => sc.X + sc.Width / 2, _ => sc.Right };
+                    double hy = dy switch { -1 => sc.Y, 0 => sc.Y + sc.Height / 2, _ => sc.Bottom };
+                    Canvas.SetLeft(t, hx - 5.5); Canvas.SetTop(t, hy - 5.5);
+                }
                 move.IsHitTestVisible = Mode == EditMode.View;
             }
             _layouters.Add(LayoutItem);
@@ -231,16 +235,33 @@ public sealed class PreviewControl : Grid
             move.DragStarted += (_, _) => { SelectedOverlay = s; OverlaySelected?.Invoke(s); Layout(); };
             move.DragDelta += (_, e) =>
             {
-                var frame = OutputFramePx();
-                double k = frame.Width / Math.Max(1, OutputWidth);
-                var r = RectOut();
-                double dx = e.HorizontalChange / _scale / k, dy = e.VerticalChange / _scale / k;
-                OverlayGeometry.ApplyPosition(OutputWidth, OutputHeight, s, item.PngWidth, item.PngHeight, r.X + dx, r.Y + dy, r.Width);
-                OverlayChanged?.Invoke(s); Layout();
+                var r = RectOut(); double k = K();
+                Apply(r.X + e.HorizontalChange / _scale / k, r.Y + e.VerticalChange / _scale / k, r.Width);
             };
-            move.DragCompleted += (_, _) =>
+            move.DragCompleted += (_, _) => SnapAnchor();
+            foreach (var (t, dx, dy) in handles)
             {
-                if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)) return;
+                int ddx = dx, ddy = dy;
+                t.DragStarted += (_, _) => { SelectedOverlay = s; OverlaySelected?.Invoke(s); };
+                t.DragDelta += (_, e) =>
+                {
+                    var r = RectOut(); double k = K();
+                    double aspect = item.PngWidth > 0 ? (double)item.PngHeight / item.PngWidth : 1;
+                    double mx = e.HorizontalChange / _scale / k, my = e.VerticalChange / _scale / k;
+                    // новая ширина: по горизонтальному движению для боковых рукояток, по вертикальному — для верх/низ, для углов — большее из двух
+                    double byX = ddx == 0 ? 0 : ddx * mx;
+                    double byY = ddy == 0 ? 0 : ddy * my / aspect;
+                    double grow = ddx != 0 && ddy != 0 ? (Math.Abs(byX) >= Math.Abs(byY) ? byX : byY) : (ddx != 0 ? byX : byY);
+                    double w = Math.Max(8, r.Width + grow), h = w * aspect;
+                    double x = ddx < 0 ? r.Right - w : ddx == 0 ? r.X + (r.Width - w) / 2 : r.X;
+                    double y = ddy < 0 ? r.Bottom - h : ddy == 0 ? r.Y + (r.Height - h) / 2 : r.Y;
+                    Apply(x, y, w);
+                };
+                t.DragCompleted += (_, _) => SnapAnchor();
+            }
+            void SnapAnchor()
+            {
+                // якорь выбирается по положению: пресет остаётся осмысленным на роликах другого размера
                 var r = RectOut();
                 var nearest = OverlayGeometry.NearestAnchor(OutputWidth, OutputHeight, r.X + r.Width / 2, r.Y + r.Height / 2);
                 if (nearest != s.Anchor)
@@ -249,18 +270,11 @@ public sealed class PreviewControl : Grid
                     OverlayGeometry.ApplyPosition(OutputWidth, OutputHeight, s, item.PngWidth, item.PngHeight, r.X, r.Y, r.Width);
                     OverlayChanged?.Invoke(s); Layout();
                 }
-            };
-            resize.DragDelta += (_, e) =>
-            {
-                var frame = OutputFramePx();
-                double k = frame.Width / Math.Max(1, OutputWidth);
-                var r = RectOut();
-                double w = Math.Max(8, r.Width + e.HorizontalChange / _scale / k);
-                OverlayGeometry.ApplyPosition(OutputWidth, OutputHeight, s, item.PngWidth, item.PngHeight, r.X, r.Y, w);
-                OverlayChanged?.Invoke(s); Layout();
-            };
+            }
         }
     }
+
+    // ------------------------------------------------------------ ретушь
 
     private void BuildRedactions()
     {
@@ -271,21 +285,24 @@ public sealed class PreviewControl : Grid
             var fill = new Rectangle
             {
                 Fill = new VisualBrush(Player) { ViewboxUnits = BrushMappingMode.RelativeToBoundingBox, Stretch = Stretch.Fill },
-                Effect = new BlurEffect { Radius = 6 + region.Strength * 3, KernelType = KernelType.Box },
+                Effect = new BlurEffect { Radius = 10, KernelType = KernelType.Box },
                 IsHitTestVisible = false,
             };
             var border = new Rectangle { Stroke = region.Mode == RedactMode.Pixelate ? Brushes.Orange : Brushes.Yellow, StrokeThickness = 1.5, IsHitTestVisible = false, StrokeDashArray = new DoubleCollection { 3, 2 } };
             var label = new TextBlock { Text = region.Mode == RedactMode.Pixelate ? "мозаика" : "размытие", Foreground = Brushes.White, FontSize = 10, Background = new SolidColorBrush(Color.FromArgb(120, 0, 0, 0)), Padding = new Thickness(3, 0, 3, 0), IsHitTestVisible = false };
             var move = Ui.TransparentThumb();
-            var resize = Ui.Handle(10, Cursors.SizeNWSE, Brushes.Yellow);
+            var resize = Ui.Handle(11, Cursors.SizeNWSE, Brushes.Yellow);
             _layer.Children.Add(fill); _layer.Children.Add(border); _layer.Children.Add(label); _layer.Children.Add(move); _layer.Children.Add(resize);
 
             Rect Px() => new(region.X * VideoWidth, region.Y * VideoHeight, region.W * VideoWidth, region.H * VideoHeight);
             void LayoutItem()
             {
-                var sc = ToScreen(Px());
+                var px = Px();
+                var sc = ToScreen(px);
                 bool active = region.FromSec is null && region.ToSec is null || (CurrentTimeSec >= (region.FromSec ?? 0) && CurrentTimeSec <= (region.ToSec ?? double.MaxValue));
                 ((VisualBrush)fill.Fill).Viewbox = new Rect(region.X, region.Y, region.W, region.H);
+                double effectPx = region.Mode == RedactMode.Pixelate ? region.EffectiveBlockSize(VideoHeight) : region.EffectiveBlurRadius((int)px.Width, (int)px.Height);
+                ((BlurEffect)fill.Effect).Radius = Math.Clamp(effectPx * _scale * (region.Mode == RedactMode.Pixelate ? 0.8 : 1.2), 2, 120);
                 fill.Opacity = active ? 1 : 0.3;
                 Place(fill, sc.X, sc.Y, sc.Width, sc.Height);
                 Place(border, sc.X, sc.Y, sc.Width, sc.Height);
@@ -298,7 +315,7 @@ public sealed class PreviewControl : Grid
                 label.Visibility = editing ? Visibility.Visible : Visibility.Collapsed;
                 resize.Visibility = selected ? Visibility.Visible : Visibility.Collapsed;
                 move.IsHitTestVisible = editing;
-                Canvas.SetLeft(resize, sc.Right - 5); Canvas.SetTop(resize, sc.Bottom - 5);
+                Canvas.SetLeft(resize, sc.Right - 5.5); Canvas.SetTop(resize, sc.Bottom - 5.5);
             }
             _layouters.Add(LayoutItem);
 
@@ -317,6 +334,8 @@ public sealed class PreviewControl : Grid
             };
         }
     }
+
+    // ------------------------------------------------------------ кроп
 
     private void BuildCropEditor()
     {
@@ -359,12 +378,7 @@ public sealed class PreviewControl : Grid
                 double right = r.Right, bottom = r.Bottom;
                 double nx = left ? r.X + dx : r.X, ny = top ? r.Y + dy : r.Y;
                 double nw = left ? right - nx : r.Width + dx, nh = top ? bottom - ny : r.Height + dy;
-                if (CropAspect is { } a && a > 0)
-                {
-                    // ведущая — ширина; высота по пропорции
-                    nw = Math.Max(32, nw); nh = nw / a;
-                    if (top) ny = bottom - nh;
-                }
+                if (CropAspect is { } a && a > 0) { nw = Math.Max(32, nw); nh = nw / a; }
                 nw = Math.Max(32, nw); nh = Math.Max(32, nh);
                 if (left) nx = right - nw;
                 if (top) ny = bottom - nh;

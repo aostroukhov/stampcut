@@ -7,17 +7,30 @@ namespace StampCut.App;
 
 public static class Program
 {
+    /// <summary>Тема Fluent (Windows 11): по системе, светлая или тёмная.</summary>
+    public static ThemeMode ThemeFor(string? name) => name?.ToLowerInvariant() switch
+    {
+        "light" => ThemeMode.Light,
+        "dark" => ThemeMode.Dark,
+        _ => ThemeMode.System,
+    };
+
     [STAThread]
     public static int Main(string[] args)
     {
-        CultureInfo.DefaultThreadCurrentCulture = CultureInfo.GetCultureInfo("ru-RU");
-        CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.GetCultureInfo("ru-RU");
+        var settings = StampCut.Core.AppSettings.Load();
+        Lang.Set(settings.Language);
+        var culture = CultureInfo.GetCultureInfo(Lang.Current == "en" ? "en-US" : "ru-RU");
+        CultureInfo.DefaultThreadCurrentCulture = culture;
+        CultureInfo.DefaultThreadCurrentUICulture = culture;
+        System.Threading.Thread.CurrentThread.CurrentCulture = culture;
+        System.Threading.Thread.CurrentThread.CurrentUICulture = culture;
 
-        var app = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
+        var app = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose, ThemeMode = ThemeFor(settings.Theme) };
         app.DispatcherUnhandledException += (_, e) =>
         {
             Logger.Error("Необработанная ошибка", e.Exception);
-            MessageBox.Show("Произошла ошибка:\n" + e.Exception.Message + "\n\nПодробности в журнале:\n" + Logger.CurrentFile,
+            MessageBox.Show(Lang.T("Произошла ошибка:") + "\n" + e.Exception.Message + "\n\n" + Lang.T("Подробности в журнале:") + "\n" + Logger.CurrentFile,
                 "StampCut", MessageBoxButton.OK, MessageBoxImage.Error);
             e.Handled = true;
         };
@@ -26,7 +39,7 @@ public static class Program
 
         Logger.Info("StampCut " + MainWindow.AppVersion + " запуск: " + string.Join(" ", args));
         var files = args.Where(File.Exists).Select(Path.GetFullPath).ToList();
-        var window = new MainWindow(files);
+        var window = new MainWindow(files, settings);
         app.MainWindow = window;
         window.Show();
         return app.Run();

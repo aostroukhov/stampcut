@@ -10,6 +10,7 @@ using StampCut.Core;
 using StampCut.Core.FFmpeg;
 using StampCut.Core.Models;
 using StampCut.Core.Presets;
+using static StampCut.App.Lang;
 
 namespace StampCut.App;
 
@@ -20,12 +21,12 @@ public sealed partial class MainWindow
     // --- оверлей
     private OverlaySettings? _selectedOverlay;
     private ComboBox _overlayPresetCombo = new();
-    private readonly ListBox _overlayList = new() { MaxHeight = 70, BorderBrush = Ui.Border, Margin = new Thickness(0, 4, 0, 4) };
-    private readonly ComboBox _overlayFileCombo = new() { Width = 200 };
-    private readonly AnchorPicker _anchorPicker = new();
-    private TextBox _offsetX = new(), _offsetY = new(), _widthBox = new(), _fadeIn = new(), _fadeOut = new(), _ovFrom = new(), _ovTo = new();
+    private readonly ListBox _overlayList = new() { MaxHeight = 70, Margin = new Thickness(0, 4, 0, 4) };
+    private readonly ComboBox _overlayFileCombo = new() { Width = 190 };
+    private TextBox _fadeIn = new(), _fadeOut = new(), _ovFrom = new(), _ovTo = new();
     private Slider _opacitySlider = new();
     private readonly TextBlock _opacityText = Ui.Label("80 %");
+    private readonly TextBlock _overlaySizeText = Ui.Label("", muted: true, size: 11);
     private RadioButton _ovWhole = new(), _ovRange = new();
     private readonly StackPanel _overlayEditor = new();
 
@@ -37,20 +38,23 @@ public sealed partial class MainWindow
     private RedactRegion? _selectedRedaction;
     private ToggleButton _redactToggle = new();
     private readonly StackPanel _redactEditor = new();
-    private Slider _strengthSlider = new();
+    private Slider _effectSlider = new();
+    private readonly TextBlock _effectLabel = Ui.Label("", muted: true);
+    private readonly TextBlock _effectValue = Ui.Label("");
     private ComboBox _redactModeCombo = new();
     private RadioButton _rdWhole = new(), _rdRange = new();
     private TextBox _rdFrom = new(), _rdTo = new();
     private readonly TextBlock _redactText = Ui.Label("", muted: true, size: 11);
 
     // --- запикать
-    private readonly ListBox _censorList = new() { MaxHeight = 90, BorderBrush = Ui.Border, Margin = new Thickness(0, 4, 0, 4) };
+    private readonly ListBox _censorList = new() { MaxHeight = 90, Margin = new Thickness(0, 4, 0, 4) };
     private AudioCensor? SelectedCensor => _censorList.SelectedItem is ListBoxItem { Tag: AudioCensor c } ? c : null;
 
     private UIElement BuildToolsPanel()
     {
         var stack = new StackPanel { Width = 300, Margin = new Thickness(8, 0, 10, 0) };
         stack.Children.Add(BuildOverlaySection());
+        stack.Children.Add(BuildFiltersSection());
         stack.Children.Add(BuildCropSection());
         stack.Children.Add(BuildRedactSection());
         stack.Children.Add(BuildCensorSection());
@@ -69,13 +73,12 @@ public sealed partial class MainWindow
     private UIElement BuildOverlaySection()
     {
         _overlayPresetCombo = Ui.Combo(_overlayPresets, p => p.Name, null, AddOverlayFromPreset, width: 200);
-        var presetRow = Ui.Row(_overlayPresetCombo, Ui.SmallButton("+", () => AddOverlayFromPreset(null), "Добавить пустой оверлей"));
+        var presetRow = Ui.Row(_overlayPresetCombo, Ui.SmallButton("+", () => AddOverlayFromPreset(null), T("Добавить пустой оверлей")));
         _overlayList.SelectionChanged += (_, _) =>
         {
             if (_syncing) return;
             if (_overlayList.SelectedItem is ListBoxItem { Tag: OverlaySettings o }) { _selectedOverlay = o; _preview.SelectedOverlay = o; SyncOverlayPanel(); _preview.Refresh(); }
         };
-
         _overlayFileCombo.SelectionChanged += (_, _) =>
         {
             if (_syncing || _selectedOverlay is null) return;
@@ -87,13 +90,9 @@ public sealed partial class MainWindow
                 _preview.Refresh();
             }
         };
-        _anchorPicker.AnchorChanged += a => { if (_selectedOverlay is null || _syncing) return; _selectedOverlay.Anchor = a; _preview.Refresh(); };
-        _offsetX = Ui.NumberBox(3, v => { if (_selectedOverlay is null) return; _selectedOverlay.OffsetX = v; _preview.Refresh(); });
-        _offsetY = Ui.NumberBox(3, v => { if (_selectedOverlay is null) return; _selectedOverlay.OffsetY = v; _preview.Refresh(); });
-        _widthBox = Ui.NumberBox(25, v => { if (_selectedOverlay is null) return; _selectedOverlay.Width = Math.Clamp(v, 1, 100); _preview.Refresh(); });
         _opacitySlider = Ui.Slider(0, 100, 80, v => { if (_selectedOverlay is null || _syncing) return; _selectedOverlay.Opacity = v / 100.0; _opacityText.Text = $"{v:0} %"; _preview.Refresh(); }, width: 150);
-        _ovWhole = new RadioButton { Content = "весь ролик", IsChecked = true, Margin = new Thickness(0, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center, Focusable = false };
-        _ovRange = new RadioButton { Content = "с", VerticalAlignment = VerticalAlignment.Center, Focusable = false };
+        _ovWhole = new RadioButton { Content = T("весь ролик"), IsChecked = true, Margin = new Thickness(0, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center, Focusable = false };
+        _ovRange = new RadioButton { Content = T("с"), VerticalAlignment = VerticalAlignment.Center, Focusable = false };
         _ovFrom = Ui.NumberBox(0, v => { if (_selectedOverlay is null) return; _selectedOverlay.FromSec = v; _ovRange.IsChecked = true; _preview.Refresh(); }, 52, "0.#");
         _ovTo = Ui.NumberBox(5, v => { if (_selectedOverlay is null) return; _selectedOverlay.ToSec = v; _ovRange.IsChecked = true; _preview.Refresh(); }, 52, "0.#");
         _ovWhole.Checked += (_, _) => { if (_selectedOverlay is null || _syncing) return; _selectedOverlay.FromSec = null; _selectedOverlay.ToSec = null; _preview.Refresh(); };
@@ -101,38 +100,36 @@ public sealed partial class MainWindow
         _fadeIn = Ui.NumberBox(0, v => { if (_selectedOverlay is null) return; _selectedOverlay.FadeInSec = Math.Max(0, v); }, 44, "0.#");
         _fadeOut = Ui.NumberBox(0, v => { if (_selectedOverlay is null) return; _selectedOverlay.FadeOutSec = Math.Max(0, v); }, 44, "0.#");
 
-        var anchorRow = new StackPanel { Orientation = Orientation.Horizontal };
-        anchorRow.Children.Add(_anchorPicker);
-        var offsets = Ui.Column(
-            Ui.Row(Ui.Label("Отступ X", muted: true), _offsetX, Ui.Label("%", muted: true)),
-            Ui.Row(Ui.Label("Отступ Y", muted: true), _offsetY, Ui.Label("%", muted: true)),
-            Ui.Row(Ui.Label("Ширина", muted: true), _widthBox, Ui.Label("% кадра", muted: true)));
-        offsets.Margin = new Thickness(10, 0, 0, 0);
-        anchorRow.Children.Add(offsets);
-
-        _overlayEditor.Children.Add(Ui.Row(Ui.Label("Файл", muted: true), _overlayFileCombo, Ui.SmallButton("…", BrowseOverlayFile, "Выбрать PNG")));
-        _overlayEditor.Children.Add(anchorRow);
-        _overlayEditor.Children.Add(Ui.Row(Ui.Label("Прозрачность", muted: true), _opacitySlider, _opacityText));
-        _overlayEditor.Children.Add(Ui.Row(Ui.Label("Показ", muted: true), _ovWhole, _ovRange, _ovFrom, Ui.Label("по", muted: true), _ovTo, Ui.Label("с", muted: true)));
-        _overlayEditor.Children.Add(Ui.Row(Ui.SmallButton("от текущей", () => { if (_selectedOverlay is null) return; _selectedOverlay.FromSec = Math.Round(OutputTime(), 2); _ovRange.IsChecked = true; SyncOverlayPanel(); _preview.Refresh(); }),
-                                           Ui.SmallButton("до текущей", () => { if (_selectedOverlay is null) return; _selectedOverlay.ToSec = Math.Round(OutputTime(), 2); _ovRange.IsChecked = true; SyncOverlayPanel(); _preview.Refresh(); }),
-                                           Ui.Label("Плавно:", muted: true), _fadeIn, _fadeOut, Ui.Label("с", muted: true)));
+        _overlayEditor.Children.Add(Ui.Row(Ui.Label(T("Файл"), muted: true), _overlayFileCombo, Ui.SmallButton("…", BrowseOverlayFile, T("Выбрать PNG"))));
+        _overlayEditor.Children.Add(Ui.Label(T("Перетащите оверлей мышью, размер меняйте за любую сторону или угол."), muted: true, size: 11));
+        _overlayEditor.Children.Add(_overlaySizeText);
+        _overlayEditor.Children.Add(Ui.Row(Ui.Label(T("Прозрачность"), muted: true), _opacitySlider, _opacityText));
+        _overlayEditor.Children.Add(Ui.Row(Ui.Label(T("Показ"), muted: true), _ovWhole, _ovRange, _ovFrom, Ui.Label(T("по"), muted: true), _ovTo, Ui.Label(T("сек"), muted: true)));
+        _overlayEditor.Children.Add(Ui.Row(Ui.SmallButton(T("от текущей"), () => { if (_selectedOverlay is null) return; _selectedOverlay.FromSec = Math.Round(OutputTime(), 2); _ovRange.IsChecked = true; SyncOverlayPanel(); _preview.Refresh(); }),
+                                           Ui.SmallButton(T("до текущей"), () => { if (_selectedOverlay is null) return; _selectedOverlay.ToSec = Math.Round(OutputTime(), 2); _ovRange.IsChecked = true; SyncOverlayPanel(); _preview.Refresh(); }),
+                                           Ui.Label(T("Плавно:"), muted: true), _fadeIn, _fadeOut, Ui.Label(T("сек"), muted: true)));
         _overlayEditor.Children.Add(Ui.Row(
-            Ui.SmallButton("Сохранить как пресет", SaveOverlayPreset),
-            Ui.SmallButton("По умолчанию", SetDefaultOverlay, "Применять этот пресет ко всем новым проектам"),
-            Ui.SmallButton("✕ Убрать", RemoveSelectedOverlay)));
+            Ui.SmallButton(T("Сохранить как пресет"), SaveOverlayPreset),
+            Ui.SmallButton(T("По умолчанию"), SetDefaultOverlay, T("Применять этот пресет ко всем новым проектам")),
+            Ui.SmallButton(T("✕ Убрать"), RemoveSelectedOverlay)));
         _overlayEditor.Visibility = Visibility.Collapsed;
 
-        var content = Ui.Column(presetRow, _overlayList, _overlayEditor);
-        return Ui.Card(Ui.Column(Ui.Header("ОВЕРЛЕЙ"), content));
+        return Ui.Card(Ui.Column(Ui.Header(T("ОВЕРЛЕЙ")), presetRow, _overlayList, _overlayEditor));
     }
 
-    /// <summary>Время на выходной ленте (для интервалов оверлея): сумма предыдущих роликов + позиция в текущем от точки входа.</summary>
+    /// <summary>Время на выходной ленте: сумма предыдущих роликов + положение внутри фрагментов текущего.</summary>
     private double OutputTime()
     {
         if (_current is null) return 0;
         double before = _clips.TakeWhile(c => !ReferenceEquals(c, _current)).Sum(c => c.DurationSec);
-        return before + Math.Max(0, Position - _current.InSec);
+        double pos = Position, inner = 0;
+        foreach (var s in _current.OrderedSegments())
+        {
+            if (pos >= s.OutSec) inner += s.DurationSec;
+            else if (pos > s.InSec) { inner += pos - s.InSec; break; }
+            else break;
+        }
+        return before + inner;
     }
 
     private OverlayItem ItemOf(OverlaySettings s) => _overlays.First(i => ReferenceEquals(i.Settings, s));
@@ -150,8 +147,8 @@ public sealed partial class MainWindow
     private void AddOverlayFromPreset(OverlaySettings? preset)
     {
         Dispatcher.BeginInvoke(() => { _syncing = true; _overlayPresetCombo.SelectedItem = null; _syncing = false; });
-        if (_overlays.Count >= 3) { ShowInfo("Не больше трёх оверлеев.", InfoKind.Warning); return; }
-        var s = preset?.Clone() ?? new OverlaySettings { Name = "Оверлей" };
+        if (_overlays.Count >= 3) { ShowInfo(T("Не больше трёх оверлеев."), InfoKind.Warning); return; }
+        var s = preset?.Clone() ?? new OverlaySettings { Name = T("Оверлей") };
         s.Id = Guid.NewGuid().ToString("N");
         if (preset is not null) { s.Name = preset.Name; _s.Settings.LastOverlayPresetId = preset.Id; }
         var item = new OverlayItem { Settings = s };
@@ -202,19 +199,19 @@ public sealed partial class MainWindow
         catch (Exception ex)
         {
             Logger.Warn("Оверлей не загрузился: " + ex.Message);
-            ShowInfo("Не удалось загрузить изображение оверлея: " + ex.Message, InfoKind.Error);
+            ShowInfo(T("Не удалось загрузить изображение оверлея: ") + ex.Message, InfoKind.Error);
         }
     }
 
     private void BrowseOverlayFile()
     {
         if (_selectedOverlay is null) return;
-        var dlg = new OpenFileDialog { Filter = "PNG с прозрачностью|*.png|Изображения|*.png;*.webp;*.jpg;*.jpeg;*.bmp", Title = "Выбрать оверлей" };
+        var dlg = new OpenFileDialog { Filter = $"{T("PNG с прозрачностью")}|*.png|{T("Изображения")}|*.png;*.webp;*.jpg;*.jpeg;*.bmp", Title = T("Выбрать оверлей") };
         var dir = _s.Settings.LibraryDir is not null && Directory.Exists(Path.Combine(_s.Settings.LibraryDir, "overlays")) ? Path.Combine(_s.Settings.LibraryDir, "overlays") : AppPaths.OverlaysDir;
         dlg.InitialDirectory = dir;
         if (dlg.ShowDialog(this) != true) return;
         _selectedOverlay.File = dlg.FileName;
-        if (string.IsNullOrEmpty(_selectedOverlay.Name) || _selectedOverlay.Name == "Оверлей") _selectedOverlay.Name = Path.GetFileNameWithoutExtension(dlg.FileName);
+        if (string.IsNullOrEmpty(_selectedOverlay.Name) || _selectedOverlay.Name == T("Оверлей")) _selectedOverlay.Name = Path.GetFileNameWithoutExtension(dlg.FileName);
         LoadOverlayImage(ItemOf(_selectedOverlay));
         SyncOverlayPanel();
         _preview.Refresh();
@@ -232,18 +229,12 @@ public sealed partial class MainWindow
         }
     }
 
-    /// <summary>Во время перетаскивания: только числа, без перестроения списков и чтения папок.</summary>
+    /// <summary>Во время перетаскивания: только подпись размера, без перестроения списков и чтения папок.</summary>
     private void SyncOverlayNumbers()
     {
         var o = _selectedOverlay;
         if (o is null) return;
-        _syncing = true;
-        try
-        {
-            _anchorPicker.Set(o.Anchor);
-            Ui.SetNumber(_offsetX, o.OffsetX); Ui.SetNumber(_offsetY, o.OffsetY); Ui.SetNumber(_widthBox, o.Width);
-        }
-        finally { _syncing = false; }
+        _overlaySizeText.Text = $"{T("Ширина")}: {o.Width:0.#}% {T("кадра")}";
     }
 
     private void SyncOverlayPanel()
@@ -255,7 +246,7 @@ public sealed partial class MainWindow
             foreach (var item in _overlays)
             {
                 var s = item.Settings;
-                var li = new ListBoxItem { Content = (s.Name.Length > 0 ? s.Name : "Оверлей") + (item.ResolvedPath is null ? "  (файл не выбран)" : ""), Tag = s, Padding = new Thickness(6, 2, 6, 2) };
+                var li = new ListBoxItem { Content = (s.Name.Length > 0 ? s.Name : T("Оверлей")) + (item.ResolvedPath is null ? "  " + T("(файл не выбран)") : ""), Tag = s, Padding = new Thickness(6, 2, 6, 2) };
                 _overlayList.Items.Add(li);
                 if (ReferenceEquals(s, _selectedOverlay)) _overlayList.SelectedItem = li;
             }
@@ -274,10 +265,9 @@ public sealed partial class MainWindow
                 _overlayFileCombo.Items.Add(ci);
                 if (string.Equals(f, resolved, StringComparison.OrdinalIgnoreCase)) _overlayFileCombo.SelectedItem = ci;
             }
-            _overlayFileCombo.Items.Add(new ComboBoxItem { Content = "Выбрать файл…", Tag = "*browse*" });
+            _overlayFileCombo.Items.Add(new ComboBoxItem { Content = T("Выбрать файл…"), Tag = "*browse*" });
 
-            _anchorPicker.Set(o.Anchor);
-            Ui.SetNumber(_offsetX, o.OffsetX); Ui.SetNumber(_offsetY, o.OffsetY); Ui.SetNumber(_widthBox, o.Width);
+            SyncOverlayNumbers();
             _opacitySlider.Value = o.Opacity * 100; _opacityText.Text = $"{o.Opacity * 100:0} %";
             bool range = o.FromSec is not null || o.ToSec is not null;
             _ovWhole.IsChecked = !range; _ovRange.IsChecked = range;
@@ -290,21 +280,20 @@ public sealed partial class MainWindow
     private void SaveOverlayPreset()
     {
         if (_selectedOverlay is null) return;
-        var name = InputWindow.Ask(this, "Пресет оверлея", "Название пресета:", _selectedOverlay.Name);
+        var name = InputWindow.Ask(this, T("Пресет оверлея"), T("Название пресета:"), _selectedOverlay.Name);
         if (name is null) return;
         var p = _selectedOverlay.Clone();
         p.Name = name; p.Id = PresetStore.SafeId(name).ToLowerInvariant();
-        // файл из библиотеки сохраняем по имени, чтобы пресет работал на других компьютерах редакции
         var resolved = ItemOf(_selectedOverlay).ResolvedPath;
         if (resolved is not null && _s.Presets.OverlayDirs(AppPaths.OverlaysDir).Any(d => string.Equals(Path.GetDirectoryName(resolved), d, StringComparison.OrdinalIgnoreCase)))
             p.File = Path.GetFileName(resolved);
-        bool toLibrary = _s.Settings.LibraryDir is not null && MessageBox.Show(this, "Сохранить в общую библиотеку редакции (да) или только на этом компьютере (нет)?", "Пресет оверлея", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
+        bool toLibrary = _s.Settings.LibraryDir is not null && MessageBox.Show(this, T("Сохранить в общую библиотеку редакции (да) или только на этом компьютере (нет)?"), T("Пресет оверлея"), MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
         _s.Presets.SaveOverlayPreset(p, toLibrary);
         _overlayPresets = _s.Presets.LoadOverlayPresets();
         RefreshOverlayPresetCombo();
         _selectedOverlay.Name = name;
         SyncOverlayPanel();
-        _statusInfo.Text = "Пресет оверлея сохранён: " + name;
+        _statusInfo.Text = T("Пресет оверлея сохранён: ") + name;
     }
 
     private void SetDefaultOverlay()
@@ -314,8 +303,8 @@ public sealed partial class MainWindow
         if (preset is null) { SaveOverlayPreset(); preset = _overlayPresets.FirstOrDefault(p => p.Name == _selectedOverlay.Name); }
         if (preset is null) return;
         _s.Settings.DefaultOverlayPresetId = preset.Id;
-        _s.Settings.Save();
-        _statusInfo.Text = $"«{preset.Name}» будет применяться ко всем новым проектам";
+        try { _s.Settings.Save(); } catch { }
+        _statusInfo.Text = $"«{preset.Name}» {T("будет применяться ко всем новым проектам")}";
     }
 
     private void RemoveSelectedOverlay()
@@ -329,6 +318,64 @@ public sealed partial class MainWindow
         _preview.Refresh();
     }
 
+    // ------------------------------------------------------------------ фильтры видео
+
+    private readonly Dictionary<string, (Slider Slider, TextBlock Value)> _filterSliders = new();
+
+    private UIElement BuildFiltersSection()
+    {
+        var col = Ui.Column(Ui.Header(T("ВИДЕО")));
+        (string Key, string Name, int Min, int Max, int Default)[] defs =
+        {
+            ("shadows", "Тени", -100, 100, 0), ("highlights", "Светлые участки", -100, 100, 0), ("saturation", "Насыщенность", 0, 200, 100),
+            ("brightness", "Яркость", -100, 100, 0), ("contrast", "Контраст", -100, 100, 0),
+        };
+        foreach (var (key, name, min, max, def) in defs)
+        {
+            var value = Ui.Label(def.ToString(), muted: true); value.Width = 34; value.TextAlignment = TextAlignment.Right;
+            var label = Ui.Label(T(name), muted: true); label.Width = 110;
+            var slider = Ui.Slider(min, max, def, v => { if (_syncing || _current is null) return; SetFilter(key, (int)Math.Round(v)); }, width: 120);
+            slider.TickFrequency = 1; slider.IsSnapToTickEnabled = true;
+            slider.MouseDoubleClick += (_, _) => slider.Value = def;
+            _filterSliders[key] = (slider, value);
+            col.Children.Add(Ui.Row(label, slider, value));
+        }
+        col.Children.Add(Ui.Label(T("Результат виден на паузе; при воспроизведении показывается исходник. Двойной клик по ползунку — сброс."), muted: true, size: 11));
+        col.Children.Add(Ui.Row(
+            Ui.SmallButton(T("Сбросить"), () => { if (_current is null) return; _current.Filters = new VideoFilters(); SyncFiltersPanel(); RefreshFilteredFrameIfPaused(); }),
+            Ui.SmallButton(T("Ко всем роликам"), () => { if (_current is null) return; foreach (var c in _clips) if (!ReferenceEquals(c, _current)) c.Filters = _current.Filters.Clone(); _statusInfo.Text = T("Фильтры применены ко всем роликам"); })));
+        return Ui.Card(col);
+    }
+
+    private void SetFilter(string key, int v)
+    {
+        if (_current is null) return;
+        var f = _current.Filters;
+        switch (key)
+        {
+            case "shadows": f.Shadows = v; break;
+            case "highlights": f.Highlights = v; break;
+            case "saturation": f.Saturation = v; break;
+            case "brightness": f.Brightness = v; break;
+            case "contrast": f.Contrast = v; break;
+        }
+        _filterSliders[key].Value.Text = v.ToString();
+        RefreshFilteredFrameIfPaused();
+    }
+
+    private void SyncFiltersPanel()
+    {
+        if (_current is null) return;
+        var f = _current.Filters;
+        _syncing = true;
+        try
+        {
+            void Set(string key, int v) { _filterSliders[key].Slider.Value = v; _filterSliders[key].Value.Text = v.ToString(); }
+            Set("shadows", f.Shadows); Set("highlights", f.Highlights); Set("saturation", f.Saturation); Set("brightness", f.Brightness); Set("contrast", f.Contrast);
+        }
+        finally { _syncing = false; }
+    }
+
     // ------------------------------------------------------------------ кроп
 
     private static readonly (string Name, double? Aspect)[] Aspects =
@@ -339,11 +386,9 @@ public sealed partial class MainWindow
 
     private UIElement BuildCropSection()
     {
-        _cropToggle = new ToggleButton { Content = "Изменить кроп", Padding = new Thickness(10, 4, 10, 4), Focusable = false };
-        _cropToggle.Checked += (_, _) => { if (!_syncing) SetEditMode(EditMode.Crop); };
-        _cropToggle.Unchecked += (_, _) => { if (!_syncing && _preview.Mode == EditMode.Crop) SetEditMode(EditMode.View); };
+        _cropToggle = Ui.Toggle(T("Изменить кроп"), false, v => { if (_syncing) return; if (v) SetEditMode(EditMode.Crop); else if (_preview.Mode == EditMode.Crop) SetEditMode(EditMode.View); });
         var aspectCombo = new ComboBox { Width = 130 };
-        foreach (var (name, _) in Aspects) aspectCombo.Items.Add(name);
+        foreach (var (name, _) in Aspects) aspectCombo.Items.Add(T(name));
         aspectCombo.SelectedIndex = 0;
         aspectCombo.SelectionChanged += (_, _) =>
         {
@@ -352,12 +397,12 @@ public sealed partial class MainWindow
             if (_current is not null && _cropAspect is { } a) { _current.Crop = CropRect.Centered(_current.Media.Width, _current.Media.Height, a); AfterCropChanged(); }
         };
         var content = Ui.Column(
-            Ui.Row(_cropToggle, Ui.Label("Пропорции", muted: true), aspectCombo),
-            Ui.Row(Ui.SmallButton("По центру", () => { if (_current is null) return; _current.Crop = _cropAspect is { } a ? CropRect.Centered(_current.Media.Width, _current.Media.Height, a) : null; AfterCropChanged(); }),
-                   Ui.SmallButton("Сбросить", () => { if (_current is null) return; _current.Crop = null; AfterCropChanged(); }),
-                   Ui.SmallButton("Ко всем роликам", () => { if (_current is null) return; foreach (var c in _clips) if (!ReferenceEquals(c, _current)) c.Crop = _current.Crop?.Clone(); AfterCropChanged(); }, "Скопировать кроп на все ролики")),
+            Ui.Row(_cropToggle, Ui.Label(T("Пропорции"), muted: true), aspectCombo),
+            Ui.Row(Ui.SmallButton(T("По центру"), () => { if (_current is null) return; _current.Crop = _cropAspect is { } a ? CropRect.Centered(_current.Media.Width, _current.Media.Height, a) : null; AfterCropChanged(); }),
+                   Ui.SmallButton(T("Сбросить"), () => { if (_current is null) return; _current.Crop = null; AfterCropChanged(); }),
+                   Ui.SmallButton(T("Ко всем роликам"), () => { if (_current is null) return; foreach (var c in _clips) if (!ReferenceEquals(c, _current)) c.Crop = _current.Crop?.Clone(); AfterCropChanged(); }, T("Скопировать кроп на все ролики"))),
             _cropText);
-        return Ui.Card(Ui.Column(Ui.Header("КРОП"), content));
+        return Ui.Card(Ui.Column(Ui.Header(T("КРОП")), content));
     }
 
     private void AfterCropChanged()
@@ -374,9 +419,9 @@ public sealed partial class MainWindow
         if (_current.Crop is { IsFull: false } c)
         {
             var (x, y, w, h) = c.ToPixels(_current.Media.Width, _current.Media.Height);
-            _cropText.Text = $"Кадр {w}×{h} из {_current.Media.Width}×{_current.Media.Height} (смещение {x}, {y})";
+            _cropText.Text = $"{T("Кадр")} {w}×{h} {T("из")} {_current.Media.Width}×{_current.Media.Height} ({T("смещение")} {x}, {y})";
         }
-        else _cropText.Text = "Без кропа: весь кадр";
+        else _cropText.Text = T("Без кропа: весь кадр");
     }
 
     private void SetEditMode(EditMode mode)
@@ -393,36 +438,49 @@ public sealed partial class MainWindow
 
     private UIElement BuildRedactSection()
     {
-        _redactToggle = new ToggleButton { Content = "Изменить области", Padding = new Thickness(10, 4, 10, 4), Focusable = false };
-        _redactToggle.Checked += (_, _) => { if (!_syncing) SetEditMode(EditMode.Redact); };
-        _redactToggle.Unchecked += (_, _) => { if (!_syncing && _preview.Mode == EditMode.Redact) SetEditMode(EditMode.View); };
-
-        _strengthSlider = Ui.Slider(1, 10, 6, v => { if (_selectedRedaction is null || _syncing) return; _selectedRedaction.Strength = (int)Math.Round(v); _preview.Refresh(); }, width: 120);
-        _strengthSlider.TickFrequency = 1; _strengthSlider.IsSnapToTickEnabled = true;
+        _redactToggle = Ui.Toggle(T("Изменить области"), false, v => { if (_syncing) return; if (v) SetEditMode(EditMode.Redact); else if (_preview.Mode == EditMode.Redact) SetEditMode(EditMode.View); });
+        _effectSlider = Ui.Slider(0, 200, 0, v =>
+        {
+            if (_selectedRedaction is null || _syncing) return;
+            int px = (int)Math.Round(v);
+            if (_selectedRedaction.Mode == RedactMode.Pixelate) _selectedRedaction.BlockSize = px; else _selectedRedaction.BlurRadius = px;
+            SyncEffectLabel(); _preview.Layout();
+        }, width: 130);
         _redactModeCombo = new ComboBox { Width = 110 };
-        _redactModeCombo.Items.Add("Размытие"); _redactModeCombo.Items.Add("Мозаика");
-        _redactModeCombo.SelectionChanged += (_, _) => { if (_selectedRedaction is null || _syncing) return; _selectedRedaction.Mode = _redactModeCombo.SelectedIndex == 1 ? RedactMode.Pixelate : RedactMode.Blur; _preview.Refresh(); RefreshClipList(); };
-        _rdWhole = new RadioButton { Content = "весь ролик", IsChecked = true, Margin = new Thickness(0, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center, Focusable = false };
-        _rdRange = new RadioButton { Content = "с", VerticalAlignment = VerticalAlignment.Center, Focusable = false };
+        _redactModeCombo.Items.Add(T("Размытие")); _redactModeCombo.Items.Add(T("Мозаика"));
+        _redactModeCombo.SelectionChanged += (_, _) => { if (_selectedRedaction is null || _syncing) return; _selectedRedaction.Mode = _redactModeCombo.SelectedIndex == 1 ? RedactMode.Pixelate : RedactMode.Blur; SyncRedactPanel(); _preview.Refresh(); RefreshClipList(); };
+        _rdWhole = new RadioButton { Content = T("весь ролик"), IsChecked = true, Margin = new Thickness(0, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center, Focusable = false };
+        _rdRange = new RadioButton { Content = T("с"), VerticalAlignment = VerticalAlignment.Center, Focusable = false };
         _rdFrom = Ui.NumberBox(0, v => { if (_selectedRedaction is null) return; _selectedRedaction.FromSec = v; _rdRange.IsChecked = true; UpdateTimelineMarkers(); }, 52, "0.#");
         _rdTo = Ui.NumberBox(0, v => { if (_selectedRedaction is null) return; _selectedRedaction.ToSec = v; _rdRange.IsChecked = true; UpdateTimelineMarkers(); }, 52, "0.#");
         _rdWhole.Checked += (_, _) => { if (_selectedRedaction is null || _syncing) return; _selectedRedaction.FromSec = null; _selectedRedaction.ToSec = null; UpdateTimelineMarkers(); _preview.Layout(); };
-        _rdRange.Checked += (_, _) => { if (_selectedRedaction is null || _syncing || _current is null) return; _selectedRedaction.FromSec ??= _current.InSec; _selectedRedaction.ToSec ??= _current.OutSec; SyncRedactPanel(); UpdateTimelineMarkers(); };
+        _rdRange.Checked += (_, _) => { if (_selectedRedaction is null || _syncing || _current is null) return; _selectedRedaction.FromSec ??= ActiveSegment?.InSec ?? 0; _selectedRedaction.ToSec ??= ActiveSegment?.OutSec ?? _current.Media.DurationSec; SyncRedactPanel(); UpdateTimelineMarkers(); };
 
-        _redactEditor.Children.Add(Ui.Row(Ui.Label("Эффект", muted: true), _redactModeCombo, Ui.Label("Сила", muted: true), _strengthSlider));
-        _redactEditor.Children.Add(Ui.Row(Ui.Label("Показ", muted: true), _rdWhole, _rdRange, _rdFrom, Ui.Label("по", muted: true), _rdTo, Ui.Label("с", muted: true)));
+        _redactEditor.Children.Add(Ui.Row(Ui.Label(T("Эффект"), muted: true), _redactModeCombo, _effectLabel, _effectSlider, _effectValue));
+        _redactEditor.Children.Add(Ui.Row(Ui.Label(T("Показ"), muted: true), _rdWhole, _rdRange, _rdFrom, Ui.Label(T("по"), muted: true), _rdTo, Ui.Label(T("сек"), muted: true)));
         _redactEditor.Children.Add(Ui.Row(
-            Ui.SmallButton("от текущей", () => { if (_selectedRedaction is null) return; _selectedRedaction.FromSec = Math.Round(Position, 2); _selectedRedaction.ToSec ??= _current?.OutSec; SyncRedactPanel(); UpdateTimelineMarkers(); }),
-            Ui.SmallButton("до текущей", () => { if (_selectedRedaction is null) return; _selectedRedaction.ToSec = Math.Round(Position, 2); _selectedRedaction.FromSec ??= _current?.InSec; SyncRedactPanel(); UpdateTimelineMarkers(); }),
-            Ui.SmallButton("✕ Удалить область", RemoveSelectedRedaction)));
+            Ui.SmallButton(T("от текущей"), () => { if (_selectedRedaction is null) return; _selectedRedaction.FromSec = Math.Round(Position, 2); _selectedRedaction.ToSec ??= _current?.Media.DurationSec; SyncRedactPanel(); UpdateTimelineMarkers(); }),
+            Ui.SmallButton(T("до текущей"), () => { if (_selectedRedaction is null) return; _selectedRedaction.ToSec = Math.Round(Position, 2); _selectedRedaction.FromSec ??= 0; SyncRedactPanel(); UpdateTimelineMarkers(); }),
+            Ui.SmallButton(T("✕ Удалить область"), RemoveSelectedRedaction)));
         _redactEditor.Visibility = Visibility.Collapsed;
 
         var content = Ui.Column(
-            Ui.Row(_redactToggle, Ui.SmallButton("+ Размытие", () => AddRedaction(RedactMode.Blur)), Ui.SmallButton("+ Мозаика", () => AddRedaction(RedactMode.Pixelate))),
-            Ui.Label("Лица, номера, недопустимый контент. Область можно двигать и растягивать на превью.", muted: true, size: 11),
+            Ui.Row(_redactToggle, Ui.SmallButton(T("+ Размытие"), () => AddRedaction(RedactMode.Blur)), Ui.SmallButton(T("+ Мозаика"), () => AddRedaction(RedactMode.Pixelate))),
+            Ui.Label(T("Лица, номера, недопустимый контент. Область можно двигать и растягивать на превью."), muted: true, size: 11),
             _redactText,
             _redactEditor);
-        return Ui.Card(Ui.Column(Ui.Header("РЕТУШЬ"), content));
+        return Ui.Card(Ui.Column(Ui.Header(T("РЕТУШЬ")), content));
+    }
+
+    private void SyncEffectLabel()
+    {
+        var r = _selectedRedaction;
+        if (r is null || _current is null) return;
+        bool pix = r.Mode == RedactMode.Pixelate;
+        _effectLabel.Text = pix ? T("Квадратик") : T("Радиус");
+        int value = pix ? r.BlockSize : r.BlurRadius;
+        int px = pix ? r.EffectiveBlockSize(_current.Media.Height) : r.EffectiveBlurRadius((int)(r.W * _current.Media.Width), (int)(r.H * _current.Media.Height));
+        _effectValue.Text = value > 0 ? $"{px} px" : $"{px} px ({T("авто")})";
     }
 
     private void AddRedaction(RedactMode mode)
@@ -457,16 +515,18 @@ public sealed partial class MainWindow
         try
         {
             if (_current is null) { _redactText.Text = ""; _redactEditor.Visibility = Visibility.Collapsed; return; }
-            _redactText.Text = _current.Redactions.Count == 0 ? "Областей нет" : $"Областей: {_current.Redactions.Count}" + (_selectedRedaction is null ? " (кликните область на превью)" : "");
+            _redactText.Text = _current.Redactions.Count == 0 ? T("Областей нет") : T("Областей: ") + _current.Redactions.Count + (_selectedRedaction is null ? T(" (кликните область на превью)") : "");
             var r = _selectedRedaction;
             _preview.SelectedRedaction = r;
             _redactEditor.Visibility = r is null ? Visibility.Collapsed : Visibility.Visible;
             if (r is null) return;
             _redactModeCombo.SelectedIndex = r.Mode == RedactMode.Pixelate ? 1 : 0;
-            _strengthSlider.Value = r.Strength;
+            _effectSlider.Maximum = r.Mode == RedactMode.Pixelate ? 200 : 300;
+            _effectSlider.Value = r.Mode == RedactMode.Pixelate ? r.BlockSize : r.BlurRadius;
+            SyncEffectLabel();
             bool range = r.FromSec is not null || r.ToSec is not null;
             _rdWhole.IsChecked = !range; _rdRange.IsChecked = range;
-            Ui.SetNumber(_rdFrom, r.FromSec ?? _current.InSec, "0.#"); Ui.SetNumber(_rdTo, r.ToSec ?? _current.OutSec, "0.#");
+            Ui.SetNumber(_rdFrom, r.FromSec ?? 0, "0.#"); Ui.SetNumber(_rdTo, r.ToSec ?? _current.Media.DurationSec, "0.#");
         }
         finally { _syncing = false; }
     }
@@ -483,24 +543,24 @@ public sealed partial class MainWindow
     {
         _censorList.SelectionChanged += (_, _) => UpdateTimelineMarkers();
         var modeCombo = new ComboBox { Width = 90 };
-        modeCombo.Items.Add("пик"); modeCombo.Items.Add("тишина");
+        modeCombo.Items.Add(T("пик")); modeCombo.Items.Add(T("тишина"));
         modeCombo.SelectedIndex = 0;
         modeCombo.SelectionChanged += (_, _) => { if (SelectedCensor is { } c) { c.Mode = modeCombo.SelectedIndex == 1 ? CensorMode.Mute : CensorMode.Beep; SyncCensorPanel(); } };
         var content = Ui.Column(
-            Ui.Row(Ui.SmallButton("+ Запикать здесь", () => AddCensor(modeCombo.SelectedIndex == 1 ? CensorMode.Mute : CensorMode.Beep), "Новый интервал от текущей позиции на 1 с"), modeCombo),
-            Ui.Label("Выделите интервал: «Начало здесь» и «Конец здесь» по ходу воспроизведения.", muted: true, size: 11),
+            Ui.Row(Ui.SmallButton(T("+ Запикать здесь"), () => AddCensor(modeCombo.SelectedIndex == 1 ? CensorMode.Mute : CensorMode.Beep), T("Новый интервал от текущей позиции на 1 с")), modeCombo),
+            Ui.Label(T("Выделите интервал: «Начало здесь» и «Конец здесь» по ходу воспроизведения."), muted: true, size: 11),
             _censorList,
             Ui.Row(
-                Ui.SmallButton("Начало здесь", () => { if (SelectedCensor is { } c) { c.FromSec = Math.Round(Position, 2); if (c.ToSec <= c.FromSec) c.ToSec = c.FromSec + 0.5; SyncCensorPanel(); } }),
-                Ui.SmallButton("Конец здесь", () => { if (SelectedCensor is { } c) { c.ToSec = Math.Round(Position, 2); if (c.ToSec <= c.FromSec) c.FromSec = Math.Max(0, c.ToSec - 0.5); SyncCensorPanel(); } }),
-                Ui.SmallButton("✕", RemoveCensor, "Удалить интервал")));
-        return Ui.Card(Ui.Column(Ui.Header("ЗАПИКАТЬ ЗВУК"), content));
+                Ui.SmallButton(T("Начало здесь"), () => { if (SelectedCensor is { } c) { c.FromSec = Math.Round(Position, 2); if (c.ToSec <= c.FromSec) c.ToSec = c.FromSec + 0.5; SyncCensorPanel(); } }),
+                Ui.SmallButton(T("Конец здесь"), () => { if (SelectedCensor is { } c) { c.ToSec = Math.Round(Position, 2); if (c.ToSec <= c.FromSec) c.FromSec = Math.Max(0, c.ToSec - 0.5); SyncCensorPanel(); } }),
+                Ui.SmallButton("✕", RemoveCensor, T("Удалить интервал"))));
+        return Ui.Card(Ui.Column(Ui.Header(T("ЗАПИКАТЬ ЗВУК")), content));
     }
 
     private void AddCensor(CensorMode mode)
     {
         if (_current is null) return;
-        if (!_current.Media.HasAudio) { ShowInfo("В этом ролике нет звуковой дорожки.", InfoKind.Warning); return; }
+        if (!_current.Media.HasAudio) { ShowInfo(T("В этом ролике нет звуковой дорожки."), InfoKind.Warning); return; }
         var c = new AudioCensor { FromSec = Math.Round(Position, 2), ToSec = Math.Min(_current.Media.DurationSec, Math.Round(Position, 2) + 1), Mode = mode };
         _current.Censors.Add(c);
         SyncCensorPanel(c);
@@ -522,7 +582,7 @@ public sealed partial class MainWindow
         if (_current is null) return;
         foreach (var c in _current.Censors.OrderBy(x => x.FromSec))
         {
-            var li = new ListBoxItem { Content = $"{TimeFormat.Format(c.FromSec)} – {TimeFormat.Format(c.ToSec)}  {(c.Mode == CensorMode.Beep ? "пик" : "тишина")}", Tag = c, Padding = new Thickness(6, 2, 6, 2) };
+            var li = new ListBoxItem { Content = $"{TimeFormat.Format(c.FromSec)} – {TimeFormat.Format(c.ToSec)}  {(c.Mode == CensorMode.Beep ? T("пик") : T("тишина"))}", Tag = c, Padding = new Thickness(6, 2, 6, 2) };
             _censorList.Items.Add(li);
             if (ReferenceEquals(c, select)) _censorList.SelectedItem = li;
         }

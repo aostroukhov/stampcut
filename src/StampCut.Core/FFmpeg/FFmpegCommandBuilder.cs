@@ -31,22 +31,22 @@ public static class FFmpegCommandBuilder
     public static List<string> Validate(ExportJob job)
     {
         var errors = new List<string>();
-        if (job.Clips.Count == 0) errors.Add("Не добавлено ни одного ролика.");
+        if (job.Clips.Count == 0) errors.Add(Loc.T("Не добавлено ни одного ролика."));
         foreach (var c in job.Clips)
         {
-            if (!c.Media.HasVideo) errors.Add($"{c.FileName}: нет видеодорожки.");
-            if (c.DurationSec < 0.05) errors.Add($"{c.FileName}: фрагмент короче 0,05 с, проверьте точки входа и выхода.");
+            if (!c.Media.HasVideo) errors.Add($"{c.FileName}: {Loc.T("нет видеодорожки.")}");
+            if (c.OrderedSegments().Count == 0) errors.Add($"{c.FileName}: {Loc.T("нет фрагментов длиннее 0,05 с, проверьте точки входа и выхода.")}");
         }
         if (job.Preset.StreamCopy)
         {
-            if (job.Overlays.Count > 0) errors.Add("Оверлей невозможен без перекодирования: выберите другой пресет экспорта.");
-            if (job.Clips.Any(c => c.Crop is { IsFull: false })) errors.Add("Кроп невозможен без перекодирования: выберите другой пресет экспорта.");
-            if (job.Clips.Any(c => c.Redactions.Count > 0)) errors.Add("Ретушь невозможна без перекодирования: выберите другой пресет экспорта.");
-            if (job.Clips.Any(c => c.Censors.Count > 0)) errors.Add("«Запикивание» невозможно без перекодирования: выберите другой пресет экспорта.");
+            if (job.Overlays.Count > 0) errors.Add(Loc.T("Оверлей невозможен без перекодирования: выберите другой пресет экспорта."));
+            if (job.Clips.Any(c => c.Crop is { IsFull: false })) errors.Add(Loc.T("Кроп невозможен без перекодирования: выберите другой пресет экспорта."));
+            if (job.Clips.Any(c => c.Redactions.Count > 0)) errors.Add(Loc.T("Ретушь невозможна без перекодирования: выберите другой пресет экспорта."));
+            if (job.Clips.Any(c => c.Censors.Count > 0)) errors.Add(Loc.T("«Запикивание» невозможно без перекодирования: выберите другой пресет экспорта."));
             if (job.Clips.Count > 1 && !AreCopyCompatible(job.Clips, out var why))
-                errors.Add("Склейка без перекодирования невозможна: " + why + " Выберите пресет с перекодированием.");
+                errors.Add(Loc.T("Склейка без перекодирования невозможна: ") + why + Loc.T(" Выберите пресет с перекодированием."));
         }
-        if (job.Encoder == HardwareEncoder.Auto) errors.Add("Кодер не определён (Auto): сначала выполните автоопределение.");
+        if (job.Encoder == HardwareEncoder.Auto) errors.Add(Loc.T("Кодер не определён (Auto): сначала выполните автоопределение."));
         return errors;
     }
 
@@ -64,20 +64,21 @@ public static class FFmpegCommandBuilder
         var r = new BuildResult { StreamCopy = true };
         var a = r.Args;
         a.AddRange(new[] { "-hide_banner", "-y", "-nostats", "-loglevel", "error", "-progress", "pipe:1" });
-        if (job.Clips.Count == 1)
+        var parts = Parts(job);
+        if (parts.Count == 1)
         {
-            var c = job.Clips[0];
-            AddTrim(a, c);
+            var (c, seg) = parts[0];
+            AddTrim(a, c, seg);
             a.AddRange(new[] { "-i", c.Media.Path });
         }
         else
         {
             var sb = new StringBuilder("ffconcat version 1.0\n");
-            foreach (var c in job.Clips)
+            foreach (var (c, seg) in parts)
             {
                 sb.Append("file '").Append(c.Media.Path.Replace('\\', '/').Replace("'", "'\\''")).Append("'\n");
-                if (c.InSec > Eps) sb.Append("inpoint ").Append(Num(c.InSec)).Append('\n');
-                if (c.OutSec < c.Media.DurationSec - Eps) sb.Append("outpoint ").Append(Num(c.OutSec)).Append('\n');
+                if (seg.InSec > Eps) sb.Append("inpoint ").Append(Num(seg.InSec)).Append('\n');
+                if (seg.OutSec < c.Media.DurationSec - Eps) sb.Append("outpoint ").Append(Num(seg.OutSec)).Append('\n');
             }
             r.ConcatList = sb.ToString();
             r.ConcatListPath = job.OutputPath + ".concat.txt";
@@ -91,6 +92,15 @@ public static class FFmpegCommandBuilder
         return r;
     }
 
+    /// <summary>Все фрагменты всех роликов по порядку: каждый — отдельный вход ffmpeg.</summary>
+    public static List<(Clip Clip, Segment Segment)> Parts(ExportJob job)
+    {
+        var list = new List<(Clip, Segment)>();
+        foreach (var c in job.Clips)
+            foreach (var s in c.OrderedSegments()) list.Add((c, s));
+        return list;
+    }
+
     public static bool AreCopyCompatible(IReadOnlyList<Clip> clips, out string why)
     {
         why = "";
@@ -98,10 +108,10 @@ public static class FFmpegCommandBuilder
         foreach (var c in clips.Skip(1))
         {
             var m = c.Media;
-            if (m.VideoCodec != f.VideoCodec || m.PixelFormat != f.PixelFormat) { why = $"у роликов разные кодеки ({f.VideoCodec}/{f.PixelFormat} и {m.VideoCodec}/{m.PixelFormat})."; return false; }
-            if (m.Width != f.Width || m.Height != f.Height) { why = $"у роликов разный размер кадра ({f.Width}×{f.Height} и {m.Width}×{m.Height})."; return false; }
-            if (Math.Abs(m.Fps - f.Fps) > 0.01) { why = $"у роликов разная частота кадров ({f.Fps:0.##} и {m.Fps:0.##})."; return false; }
-            if (m.HasAudio != f.HasAudio || m.AudioCodec != f.AudioCodec || m.SampleRate != f.SampleRate || m.Channels != f.Channels) { why = "у роликов разный звук."; return false; }
+            if (m.VideoCodec != f.VideoCodec || m.PixelFormat != f.PixelFormat) { why = $"{Loc.T("у роликов разные кодеки")} ({f.VideoCodec}/{f.PixelFormat}, {m.VideoCodec}/{m.PixelFormat})."; return false; }
+            if (m.Width != f.Width || m.Height != f.Height) { why = $"{Loc.T("у роликов разный размер кадра")} ({f.Width}×{f.Height}, {m.Width}×{m.Height})."; return false; }
+            if (Math.Abs(m.Fps - f.Fps) > 0.01) { why = $"{Loc.T("у роликов разная частота кадров")} ({f.Fps:0.##}, {m.Fps:0.##})."; return false; }
+            if (m.HasAudio != f.HasAudio || m.AudioCodec != f.AudioCodec || m.SampleRate != f.SampleRate || m.Channels != f.Channels) { why = Loc.T("у роликов разный звук."); return false; }
         }
         return true;
     }
@@ -123,34 +133,37 @@ public static class FFmpegCommandBuilder
         r.OutputFps = ComputeOutputFps(job);
         double effFps = r.OutputFps > 0 ? r.OutputFps : Math.Max(1, job.Clips.Max(c => c.Media.Fps > 0 ? c.Media.Fps : 30));
 
-        // --- входы
+        // --- входы: по одному на фрагмент
+        var parts = Parts(job);
+        int n = parts.Count;
         bool anyAudio = job.Clips.Any(c => c.Media.HasAudio);
-        var audioInputIndex = new int[job.Clips.Count];
+        var audioInputIndex = new int[n];
         int inputIndex = 0;
-        for (int i = 0; i < job.Clips.Count; i++)
+        for (int i = 0; i < n; i++)
         {
-            var c = job.Clips[i];
+            var (c, seg) = parts[i];
             if (!string.IsNullOrEmpty(job.HwAccel)) a.AddRange(new[] { "-hwaccel", job.HwAccel });
-            AddTrim(a, c);
+            AddTrim(a, c, seg);
             a.AddRange(new[] { "-i", c.Media.Path });
             audioInputIndex[i] = c.Media.HasAudio ? inputIndex : -1;
             inputIndex++;
         }
         if (anyAudio)
-            for (int i = 0; i < job.Clips.Count; i++)
-                if (!job.Clips[i].Media.HasAudio)
+            for (int i = 0; i < n; i++)
+                if (!parts[i].Clip.Media.HasAudio)
                 {
-                    a.AddRange(new[] { "-f", "lavfi", "-t", Num(job.Clips[i].DurationSec), "-i", $"anullsrc=channel_layout=stereo:sample_rate={p.SampleRate}" });
+                    a.AddRange(new[] { "-f", "lavfi", "-t", Num(parts[i].Segment.DurationSec), "-i", $"anullsrc=channel_layout=stereo:sample_rate={p.SampleRate}" });
                     audioInputIndex[i] = inputIndex++;
                 }
-        var beepInputIndex = new int[job.Clips.Count];
+        var beepInputIndex = new int[n];
         if (anyAudio)
-            for (int i = 0; i < job.Clips.Count; i++)
+            for (int i = 0; i < n; i++)
             {
                 beepInputIndex[i] = -1;
-                if (job.Clips[i].Censors.Any(x => x.Mode == CensorMode.Beep && x.ToSec > x.FromSec))
+                var (c, seg) = parts[i];
+                if (c.Censors.Any(x => x.Mode == CensorMode.Beep && x.ToSec > x.FromSec && x.ToSec > seg.InSec && x.FromSec < seg.OutSec))
                 {
-                    a.AddRange(new[] { "-f", "lavfi", "-t", Num(job.Clips[i].DurationSec), "-i", $"sine=frequency=1000:sample_rate={p.SampleRate}" });
+                    a.AddRange(new[] { "-f", "lavfi", "-t", Num(seg.DurationSec), "-i", $"sine=frequency=1000:sample_rate={p.SampleRate}" });
                     beepInputIndex[i] = inputIndex++;
                 }
             }
@@ -167,20 +180,20 @@ public static class FFmpegCommandBuilder
 
         // --- граф фильтров
         var g = new StringBuilder();
-        for (int i = 0; i < job.Clips.Count; i++)
+        for (int i = 0; i < n; i++)
         {
-            var c = job.Clips[i];
-            string label = BuildClipChain(g, c, i, outW, outH, r.OutputFps, p, isFirst: i == 0);
+            var (c, seg) = parts[i];
+            string label = BuildClipChain(g, c, seg, i, outW, outH, r.OutputFps, p, isFirst: ReferenceEquals(c, job.Clips[0]));
             g.Append($"[{label}]setsar=1[v{i}];");
             if (anyAudio)
-                BuildAudioChain(g, c, i, audioInputIndex[i], beepInputIndex[i], p);
+                BuildAudioChain(g, c, seg, i, audioInputIndex[i], beepInputIndex[i], p);
         }
 
         string v = "v0", au = "a0";
-        if (job.Clips.Count > 1)
+        if (n > 1)
         {
-            for (int i = 0; i < job.Clips.Count; i++) g.Append($"[v{i}]").Append(anyAudio ? $"[a{i}]" : "");
-            g.Append($"concat=n={job.Clips.Count}:v=1:a={(anyAudio ? 1 : 0)}[vc]").Append(anyAudio ? "[ac]" : "").Append(';');
+            for (int i = 0; i < n; i++) g.Append($"[v{i}]").Append(anyAudio ? $"[a{i}]" : "");
+            g.Append($"concat=n={n}:v=1:a={(anyAudio ? 1 : 0)}[vc]").Append(anyAudio ? "[ac]" : "").Append(';');
             v = "vc"; au = "ac";
         }
         if (anyAudio && p.LoudnessNormalize)
@@ -222,11 +235,12 @@ public static class FFmpegCommandBuilder
     }
 
     /// <summary>Звук одного ролика: ресемплинг → «запикивание» (гейт громкости + тон) → [a{i}].</summary>
-    private static void BuildAudioChain(StringBuilder g, Clip c, int i, int audioInput, int beepInput, ExportPreset p)
+    private static void BuildAudioChain(StringBuilder g, Clip c, Segment seg, int i, int audioInput, int beepInput, ExportPreset p)
     {
         var af = new List<string> { $"aresample={p.SampleRate}", "aformat=sample_fmts=fltp:channel_layouts=stereo" };
+        if (Math.Abs(c.AudioGainDb) >= 0.05) af.Add($"volume={Num(Math.Clamp(c.AudioGainDb, -30, 30))}dB");
         var segments = c.Censors.Where(x => x.ToSec > x.FromSec)
-            .Select(x => (From: Math.Max(0, x.FromSec - c.InSec), To: Math.Max(0, x.ToSec - c.InSec), x.Mode))
+            .Select(x => (From: Math.Max(0, x.FromSec - seg.InSec), To: Math.Max(0, Math.Min(x.ToSec, seg.OutSec) - seg.InSec), x.Mode))
             .Where(x => x.To > x.From).ToList();
         if (segments.Count == 0)
         {
@@ -248,13 +262,14 @@ public static class FFmpegCommandBuilder
     }
 
     /// <summary>Цепочка одного ролика: тонмэппинг → формат → ретушь → кроп → вписывание → fps. Возвращает метку результата.</summary>
-    private static string BuildClipChain(StringBuilder g, Clip c, int i, int outW, int outH, int fps, ExportPreset p, bool isFirst)
+    private static string BuildClipChain(StringBuilder g, Clip c, Segment seg, int i, int outW, int outH, int fps, ExportPreset p, bool isFirst)
     {
         var m = c.Media;
         var chain = new List<string>();
         if (m.IsHdr && p.HdrToSdr)
             chain.Add("zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv");
         chain.Add("format=yuv420p");
+        chain.AddRange(c.Filters.ToFfmpeg());
         string cur = $"c{i}_0";
         g.Append($"[{i}:v:0]{string.Join(",", chain)}[{cur}];");
 
@@ -264,13 +279,18 @@ public static class FFmpegCommandBuilder
         {
             var (x, y, w, h) = PixelRect(rd.X, rd.Y, rd.W, rd.H, m.Width, m.Height);
             if (w < 4 || h < 4) continue;
+            if (rd.FromSec is not null || rd.ToSec is not null)
+            {
+                // область вне этого фрагмента — не нужна
+                if ((rd.ToSec ?? double.MaxValue) <= seg.InSec || (rd.FromSec ?? 0) >= seg.OutSec) continue;
+            }
             k++;
-            string effect = rd.Mode == RedactMode.Pixelate ? Pixelate(w, h, rd.Strength) : Blur(w, h, rd.Strength);
+            string effect = rd.Mode == RedactMode.Pixelate ? Pixelate(w, h, rd.EffectiveBlockSize(m.Height)) : Blur(w, h, rd.EffectiveBlurRadius(w, h));
             string enable = "";
             if (rd.FromSec is not null || rd.ToSec is not null)
             {
-                double from = Math.Max(0, (rd.FromSec ?? c.InSec) - c.InSec);
-                double to = Math.Max(from, (rd.ToSec ?? c.OutSec) - c.InSec);
+                double from = Math.Max(0, (rd.FromSec ?? seg.InSec) - seg.InSec);
+                double to = Math.Max(from, (rd.ToSec ?? seg.OutSec) - seg.InSec);
                 enable = $":enable='between(t,{Num(from)},{Num(to)})'";
             }
             g.Append($"[{cur}]split[c{i}_m{k}][c{i}_r{k}];");
@@ -324,19 +344,17 @@ public static class FFmpegCommandBuilder
         return cur;
     }
 
-    private static string Blur(int w, int h, int strength)
+    private static string Blur(int w, int h, int radius)
     {
-        int r = (int)Math.Round(Math.Min(w, h) * Math.Clamp(strength, 1, 10) / 25.0);
-        r = Math.Clamp(r, 1, Math.Max(1, Math.Min(w, h) / 2 - 1));
+        int r = Math.Clamp(radius, 1, Math.Max(1, Math.Min(w, h) / 2 - 1)); // boxblur: радиус меньше половины стороны
         int cr = Math.Max(1, r / 2);
         return $"boxblur=lr={r}:lp=2:cr={cr}:cp=2";
     }
 
-    private static string Pixelate(int w, int h, int strength)
+    private static string Pixelate(int w, int h, int blockPx)
     {
-        int blocks = 24 - 2 * Math.Clamp(strength, 1, 10); // 22 … 4 блока по меньшей стороне
-        int block = Math.Max(2, Math.Min(w, h) / blocks);
-        int sw = Math.Max(1, w / block), sh = Math.Max(1, h / block);
+        int block = Math.Clamp(blockPx, 2, Math.Max(2, Math.Min(w, h)));
+        int sw = Math.Max(1, (int)Math.Round((double)w / block)), sh = Math.Max(1, (int)Math.Round((double)h / block));
         return $"scale={sw}:{sh}:flags=area,scale={w}:{h}:flags=neighbor";
     }
 
@@ -370,7 +388,7 @@ public static class FFmpegCommandBuilder
     {
         var p = job.Preset;
         int max = p.MaxFps > 0 ? p.MaxFps : 60;
-        if (job.Clips.Count == 1)
+        if (job.Clips.Count == 1) // несколько фрагментов одного файла — одна и та же частота, fps-фильтр не нужен
         {
             var m = job.Clips[0].Media;
             if (m.Fps > max + 0.01) return max;
@@ -381,10 +399,10 @@ public static class FFmpegCommandBuilder
         return Math.Min(max, Math.Max(1, best));
     }
 
-    private static void AddTrim(List<string> a, Clip c)
+    private static void AddTrim(List<string> a, Clip c, Segment seg)
     {
-        if (c.InSec > Eps) a.AddRange(new[] { "-ss", Num(c.InSec) });
-        if (c.OutSec < c.Media.DurationSec - Eps) a.AddRange(new[] { "-to", Num(c.OutSec) });
+        if (seg.InSec > Eps) a.AddRange(new[] { "-ss", Num(seg.InSec) });
+        if (seg.OutSec < c.Media.DurationSec - Eps) a.AddRange(new[] { "-to", Num(seg.OutSec) });
     }
 
     /// <summary>

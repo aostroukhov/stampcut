@@ -57,22 +57,22 @@ public sealed class Exporter
             if (!result.Success)
             {
                 TryDelete(tempPath);
-                return new ExportOutcome(false, null, "ffmpeg завершился с ошибкой:\n" + MediaProbe.Tail(result.StdErr, 8), result.Elapsed, cmd);
+                return new ExportOutcome(false, null, Loc.T("ffmpeg завершился с ошибкой:") + "\n" + MediaProbe.Tail(result.StdErr, 8), result.Elapsed, cmd);
             }
             if (!File.Exists(tempPath) || new FileInfo(tempPath).Length == 0)
             {
                 TryDelete(tempPath);
-                return new ExportOutcome(false, null, "ffmpeg не создал выходной файл.", result.Elapsed, cmd);
+                return new ExportOutcome(false, null, Loc.T("ffmpeg не создал выходной файл."), result.Elapsed, cmd);
             }
             finalPath = UniquePath(finalPath);
             File.Move(tempPath, finalPath);
             progress?.Report(new ExportProgress(1, 0, result.Elapsed, TimeSpan.Zero, job.TotalDurationSec));
-            return new ExportOutcome(true, finalPath, "Готово", result.Elapsed, cmd);
+            return new ExportOutcome(true, finalPath, Loc.T("Готово"), result.Elapsed, cmd);
         }
         catch (OperationCanceledException)
         {
             TryDelete(tempPath);
-            return new ExportOutcome(false, null, "Экспорт отменён", TimeSpan.Zero, cmd);
+            return new ExportOutcome(false, null, Loc.T("Экспорт отменён"), TimeSpan.Zero, cmd);
         }
         finally
         {

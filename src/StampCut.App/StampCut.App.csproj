@@ -1,11 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <RootNamespace>StampCut.App</RootNamespace>
     <AssemblyName>StampCut</AssemblyName>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets/icon.ico</ApplicationIcon>
+    <NoWarn>$(NoWarn);WPF0001</NoWarn>
     <SatelliteResourceLanguages>ru</SatelliteResourceLanguages>
     <InvariantGlobalization>false</InvariantGlobalization>
   </PropertyGroup>
@@ -14,5 +16,8 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../StampCut.Core/StampCut.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Resource Include="Assets/icon.ico" />
   </ItemGroup>
 </Project>

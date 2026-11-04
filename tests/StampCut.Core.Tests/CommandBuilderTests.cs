@@ -71,14 +71,13 @@ public class CommandBuilderTests
     {
         var clip = Clip.FromMedia(Media());
         clip.InSec = 10;
-        clip.Redactions.Add(new RedactRegion { X = 0.5, Y = 0.5, W = 0.1, H = 0.1, Mode = RedactMode.Blur, Strength = 6, FromSec = 12, ToSec = 15 });
-        clip.Redactions.Add(new RedactRegion { X = 0, Y = 0, W = 0.2, H = 0.2, Mode = RedactMode.Pixelate, Strength = 8 });
+        clip.Redactions.Add(new RedactRegion { X = 0.5, Y = 0.5, W = 0.1, H = 0.1, Mode = RedactMode.Blur, BlurRadius = 20, FromSec = 12, ToSec = 15 });
+        clip.Redactions.Add(new RedactRegion { X = 0, Y = 0, W = 0.2, H = 0.2, Mode = RedactMode.Pixelate, BlockSize = 24 });
         var g = Graph(Job(Telegram(), clip));
         Assert.Contains("split[c0_m1][c0_r1]", g);
-        Assert.Contains("crop=192:108:960:540,boxblur=", g);
+        Assert.Contains("crop=192:108:960:540,boxblur=lr=20:lp=2:cr=10:cp=2", g);
         Assert.Contains("overlay=x=960:y=540:enable='between(t,2,5)'", g);
-        Assert.Contains("flags=neighbor", g);
-        Assert.Contains("crop=384:216:0:0,scale=", g);
+        Assert.Contains("crop=384:216:0:0,scale=16:9:flags=area,scale=384:216:flags=neighbor", g);
     }
 
     [Fact]
@@ -127,6 +126,30 @@ public class CommandBuilderTests
     }
 
     [Fact]
+    public void MultipleSegments_OfOneClip_BecomeSeparateInputsAndConcat()
+    {
+        var clip = Clip.FromMedia(Media(dur: 60));
+        clip.Segments.Clear();
+        clip.Segments.Add(new Segment { InSec = 30, OutSec = 35 });
+        clip.Segments.Add(new Segment { InSec = 5, OutSec = 10 }); // порядок — по времени
+        clip.Censors.Add(new AudioCensor { FromSec = 31, ToSec = 32, Mode = CensorMode.Beep });
+        var r = FFmpegCommandBuilder.Build(Job(Telegram(), clip));
+        var cmd = string.Join(" ", r.Args);
+        Assert.Contains("-ss 5 -to 10 -i C:/v/a.mp4", cmd);
+        Assert.Contains("-ss 30 -to 35 -i C:/v/a.mp4", cmd);
+        Assert.Contains("concat=n=2:v=1:a=1", r.FilterGraph);
+        Assert.DoesNotContain("fps=", r.FilterGraph);
+        Assert.Contains("[1:a:0]", r.FilterGraph);
+        Assert.Contains("between(t,1,2)", r.FilterGraph); // пик относительно начала второго фрагмента (30 с)
+        Assert.Equal(10, clip.DurationSec, 6);
+
+        clip.Censors.Clear(); // без перекодирования «пик» недоступен
+        var ll = FFmpegCommandBuilder.Build(Job(Lossless(), clip));
+        Assert.Contains("inpoint 5\noutpoint 10\n", ll.ConcatList);
+        Assert.Contains("inpoint 30\noutpoint 35\n", ll.ConcatList);
+    }
+
+    [Fact]
     public void VerticalPreset_PadBlur_ForHorizontalSource()
     {
         var clip = Clip.FromMedia(Media());
@@ -149,6 +172,20 @@ public class CommandBuilderTests
         Assert.Contains("volume=volume='if(between(t,1,2)+between(t,4,4.5),0,1)':eval=frame[a0_src]", r.FilterGraph);
         Assert.Contains("volume=volume='if(between(t,1,2),0.25,0)':eval=frame[a0_beep]", r.FilterGraph);
         Assert.Contains("amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a0]", r.FilterGraph);
+    }
+
+    [Fact]
+    public void ClipGain_AndFilters_GoIntoChains()
+    {
+        var clip = Clip.FromMedia(Media());
+        clip.AudioGainDb = 6;
+        clip.Filters = new VideoFilters { Shadows = 50, Highlights = 100, Saturation = 140, Brightness = 10, Contrast = -20 };
+        var g = Graph(Job(Telegram(), clip));
+        Assert.Contains("volume=6dB", g);
+        Assert.Contains("curves=all='0/0 0.25/0.325 0.5/0.5 0.75/0.6 1/1'", g);
+        Assert.Contains("eq=saturation=1.4:brightness=0.03:contrast=0.9", g);
+        Assert.True(new VideoFilters().IsDefault);
+        Assert.Empty(new VideoFilters().ToFfmpeg());
     }
 
     [Fact]

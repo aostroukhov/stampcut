@@ -163,7 +163,7 @@ public sealed class MediaProbe
 
     public static string Tail(string text, int lines = 5)
     {
-        var all = text.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        var all = text.Replace("\r", "").Split('\n', StringSplitOptions.RemoveEmptyEntries);
         return string.Join("\n", all.TakeLast(lines));
     }
 }

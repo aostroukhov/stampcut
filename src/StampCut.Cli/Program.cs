@@ -57,8 +57,8 @@ public static class Program
             общие:   --preset ID  --encoder auto|none|nvenc|qsv|amf  --no-hwdecode  --out PATH  --dry-run  --list-presets
             оверлей: --overlay PNG  --anchor top-left|top-center|...|bottom-right  --offset X,Y(%)  --size W(%)  --opacity 0..1
                      --show FROM-TO (сек)  --fade IN,OUT (сек)
-            ролик:   --in SEC  --to SEC  --crop X,Y,W,H (доли 0..1)
-                     --blur X,Y,W,H[,FROM,TO]  --pixelate X,Y,W,H[,FROM,TO]  --strength 1..10
+            ролик:   --in SEC  --to SEC  (или несколько фрагментов: --segment FROM-TO --segment FROM-TO …)  --crop X,Y,W,H (доли 0..1)
+                     --blur X,Y,W,H[,FROM,TO]  --pixelate X,Y,W,H[,FROM,TO]  --strength N (радиус/квадратик = N×4 px)
                      --beep FROM-TO  --mute FROM-TO
         """);
 
@@ -125,13 +125,15 @@ public static class Program
                 case "--clip": cur = new ClipSpec { Path = Next() }; clipSpecs.Add(cur); break;
                 case "--in": Clip().In = Dbl(Next()); break;
                 case "--to": Clip().Out = Dbl(Next()); break;
+                case "--segment": { var (f, t) = Range(Next()); Clip().Segments.Add(new Segment { InSec = f, OutSec = t }); break; }
                 case "--crop": { var v = Nums(Next(), 4); Clip().Crop = new CropRect { X = v[0], Y = v[1], W = v[2], H = v[3] }; break; }
                 case "--strength": Clip().Strength = (int)Dbl(Next()); break;
                 case "--blur":
                 case "--pixelate":
                     {
                         var v = Nums(Next(), 4, 6);
-                        var r = new RedactRegion { X = v[0], Y = v[1], W = v[2], H = v[3], Mode = a == "--blur" ? RedactMode.Blur : RedactMode.Pixelate, Strength = Clip().Strength };
+                        var r = new RedactRegion { X = v[0], Y = v[1], W = v[2], H = v[3], Mode = a == "--blur" ? RedactMode.Blur : RedactMode.Pixelate };
+                        if (a == "--blur") r.BlurRadius = Clip().Strength * 4; else r.BlockSize = Clip().Strength * 4;
                         if (v.Length == 6) { r.FromSec = v[4]; r.ToSec = v[5]; }
                         Clip().Redactions.Add(r);
                         break;
@@ -159,6 +161,11 @@ public static class Program
         {
             var media = await probe.ProbeAsync(spec.Path);
             var clip = Core.Models.Clip.FromMedia(media);
+            if (spec.Segments.Count > 0)
+            {
+                clip.Segments.Clear();
+                foreach (var sg in spec.Segments) clip.Segments.Add(new Segment { InSec = sg.InSec, OutSec = Math.Min(sg.OutSec, media.DurationSec) });
+            }
             if (spec.In is { } ci) clip.InSec = ci;
             if (spec.Out is { } co) clip.OutSec = Math.Min(co, media.DurationSec);
             clip.Crop = spec.Crop;
@@ -222,6 +229,7 @@ public static class Program
         public string Path = "";
         public double? In, Out;
         public CropRect? Crop;
+        public List<Segment> Segments = new();
         public int Strength = 6;
         public List<RedactRegion> Redactions = new();
         public List<AudioCensor> Censors = new();

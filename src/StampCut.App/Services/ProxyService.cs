@@ -96,12 +96,13 @@ public sealed class ProxyService
     }
 
     /// <summary>Кадр для мгновенного показа, пока готовится прокси или открывается плеер.</summary>
-    public async Task<string?> PosterAsync(MediaInfo media, double atSec, CancellationToken ct)
+    public async Task<string?> PosterAsync(MediaInfo media, double atSec, CancellationToken ct, VideoFilters? filters = null)
     {
-        var path = Path.Combine(AppPaths.TempDir, Path.GetFileNameWithoutExtension(ProxyBuilder.ProxyPath(media, AppPaths.ProxyDir)) + "_poster.jpg");
+        var path = Path.Combine(AppPaths.TempDir, Path.GetFileNameWithoutExtension(ProxyBuilder.ProxyPath(media, AppPaths.ProxyDir)) + (filters is null ? "_poster.jpg" : "_filtered.jpg"));
         var vf = media.IsHdr
             ? "scale=-2:720,zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p"
-            : "scale=-2:720";
+            : "scale=-2:720,format=yuv420p";
+        if (filters is not null && !filters.IsDefault) vf += "," + string.Join(",", filters.ToFfmpeg());
         var args = new[] { "-hide_banner", "-y", "-loglevel", "error", "-ss", TimeFormat.Num(atSec), "-i", media.Path, "-frames:v", "1", "-vf", vf, "-q:v", "4", path };
         var r = await ProcessRunner.RunAsync(_s.Ffmpeg.Ffmpeg, args, ct, TimeSpan.FromSeconds(30));
         return r.Success && File.Exists(path) ? path : null;

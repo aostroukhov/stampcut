@@ -5,37 +5,45 @@ using System.Windows.Media;
 
 namespace StampCut.App.Controls;
 
-/// <summary>Фабрика элементов интерфейса без XAML: единый стиль, минимум кода в окне.</summary>
+/// <summary>
+/// Фабрика элементов без XAML. Цвета берутся из темы Fluent (Windows 11) по ключам ресурсов,
+/// чтобы светлая и тёмная темы выглядели правильно; при отсутствии ключа — запасной цвет.
+/// </summary>
 public static class Ui
 {
-    public static readonly Brush Accent = new SolidColorBrush(Color.FromRgb(0x2F, 0x6F, 0xED));
-    public static readonly Brush AccentDark = new SolidColorBrush(Color.FromRgb(0x1F, 0x4F, 0xB5));
-    public static readonly Brush PanelBg = new SolidColorBrush(Color.FromRgb(0xF4, 0xF5, 0xF7));
-    public static readonly Brush Border = new SolidColorBrush(Color.FromRgb(0xD6, 0xD9, 0xDE));
-    public static readonly Brush Muted = new SolidColorBrush(Color.FromRgb(0x6B, 0x72, 0x80));
-    public static readonly Brush PreviewBg = new SolidColorBrush(Color.FromRgb(0x14, 0x14, 0x16));
-    public static readonly Brush Danger = new SolidColorBrush(Color.FromRgb(0xD9, 0x3A, 0x3A));
-    public static readonly Brush Warning = new SolidColorBrush(Color.FromRgb(0xFF, 0xF4, 0xCE));
-    public static readonly Brush Success = new SolidColorBrush(Color.FromRgb(0xE3, 0xF6, 0xE3));
+    public static readonly Brush Accent = Frozen(Color.FromRgb(0x00, 0x67, 0xC0));
+    public static readonly Brush Muted = Frozen(Color.FromRgb(0x6B, 0x72, 0x80));
+    public static readonly Brush PreviewBg = Frozen(Color.FromRgb(0x14, 0x14, 0x16));
+    public static readonly Brush Danger = Frozen(Color.FromRgb(0xC4, 0x2B, 0x1C));
+    public static readonly Brush CardBg = Frozen(Color.FromArgb(0xB3, 0xFF, 0xFF, 0xFF));
+    public static readonly Brush CardBorder = Frozen(Color.FromArgb(0x0F, 0x00, 0x00, 0x00));
 
-    static Ui()
-    {
-        foreach (var b in new[] { Accent, AccentDark, PanelBg, Border, Muted, PreviewBg, Danger, Warning, Success }) b.Freeze();
-    }
+    private static Brush Frozen(Color c) { var b = new SolidColorBrush(c); b.Freeze(); return b; }
 
     /// <summary>file:-URI для пути с «#» и «%»: new Uri(path) считает «#» началом фрагмента и теряет хвост имени.</summary>
     public static Uri FileUri(string path) => new(path.Replace("%", "%25").Replace("#", "%23"));
+
+    /// <summary>Ресурс темы, если он есть, иначе запасная кисть.</summary>
+    public static void Themed(FrameworkElement el, DependencyProperty prop, string key, Brush fallback)
+    {
+        if (Application.Current?.TryFindResource(key) is not null) el.SetResourceReference(prop, key);
+        else el.SetValue(prop, fallback);
+    }
+
+    public static Brush ThemeBrush(string key, Brush fallback) => Application.Current?.TryFindResource(key) as Brush ?? fallback;
 
     public static Button Button(string text, Action onClick, bool primary = false, string? tooltip = null, double minWidth = 0)
     {
         var b = new Button
         {
-            Content = text, Padding = new Thickness(12, 6, 12, 6), Margin = new Thickness(0, 0, 6, 0), MinWidth = minWidth,
-            ToolTip = tooltip, Cursor = System.Windows.Input.Cursors.Hand, FontSize = 13, Focusable = false,
+            Content = text, Padding = new Thickness(12, 5, 12, 5), Margin = new Thickness(0, 0, 6, 0), MinWidth = minWidth,
+            ToolTip = tooltip, Cursor = System.Windows.Input.Cursors.Hand, Focusable = false,
         };
         if (primary)
         {
-            b.Background = Accent; b.Foreground = Brushes.White; b.BorderBrush = AccentDark; b.FontWeight = FontWeights.SemiBold;
+            if (Application.Current?.TryFindResource("AccentButtonStyle") is Style accent) b.Style = accent;
+            else { b.Background = Accent; b.Foreground = Brushes.White; b.BorderBrush = Accent; }
+            b.FontWeight = FontWeights.SemiBold;
         }
         b.Click += (_, _) => onClick();
         return b;
@@ -48,14 +56,31 @@ public static class Ui
         return b;
     }
 
-    public static TextBlock Label(string text, bool muted = false, double size = 12, FontWeight? weight = null)
-        => new() { Text = text, FontSize = size, Foreground = muted ? Muted : Brushes.Black, FontWeight = weight ?? FontWeights.Normal, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap };
+    public static ToggleButton Toggle(string text, bool isChecked, Action<bool> onChange, string? tooltip = null)
+    {
+        var t = new ToggleButton { Content = text, IsChecked = isChecked, Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(0, 0, 6, 0), ToolTip = tooltip, Focusable = false };
+        t.Checked += (_, _) => onChange(true);
+        t.Unchecked += (_, _) => onChange(false);
+        return t;
+    }
 
-    public static TextBlock Header(string text) => new() { Text = text, FontSize = 12, FontWeight = FontWeights.Bold, Foreground = Muted, Margin = new Thickness(0, 10, 0, 4) };
+    public static TextBlock Label(string text, bool muted = false, double size = 12, FontWeight? weight = null)
+    {
+        var tb = new TextBlock { Text = text, FontSize = size, FontWeight = weight ?? FontWeights.Normal, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap };
+        if (muted) Themed(tb, TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush", Muted);
+        return tb;
+    }
+
+    public static TextBlock Header(string text)
+    {
+        var tb = new TextBlock { Text = text, FontSize = 12, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 8, 0, 4) };
+        Themed(tb, TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush", Muted);
+        return tb;
+    }
 
     public static StackPanel Row(params UIElement[] children)
     {
-        var sp = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 2) };
+        var sp = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 3, 0, 3) };
         foreach (var c in children)
         {
             if (c is FrameworkElement fe && fe.Margin == default) fe.Margin = new Thickness(0, 0, 6, 0);
@@ -99,7 +124,7 @@ public static class Ui
 
     public static ComboBox Combo<T>(IEnumerable<T> items, Func<T, string> display, T? selected, Action<T> onSelect, double width = 180) where T : class
     {
-        var cb = new ComboBox { Width = width, Padding = new Thickness(6, 4, 6, 4) };
+        var cb = new ComboBox { Width = width };
         foreach (var it in items) cb.Items.Add(new ComboBoxItem { Content = display(it), Tag = it });
         if (selected is not null)
             foreach (ComboBoxItem it in cb.Items) if (ReferenceEquals(it.Tag, selected)) { cb.SelectedItem = it; break; }
@@ -115,23 +140,21 @@ public static class Ui
         return c;
     }
 
-    public static Border Card(UIElement content, Brush? bg = null)
-        => new() { Child = content, Background = bg ?? Brushes.White, BorderBrush = Border, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(10, 6, 10, 8), Margin = new Thickness(0, 0, 0, 8) };
-
-    public static Expander Section(string title, UIElement content, bool expanded = true)
-        => new() { Header = new TextBlock { Text = title, FontWeight = FontWeights.SemiBold, FontSize = 13 }, Content = content, IsExpanded = expanded, Margin = new Thickness(0, 0, 0, 6) };
+    public static Border Card(UIElement content)
+    {
+        var b = new Border { Child = content, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(12, 6, 12, 10), Margin = new Thickness(0, 0, 0, 8) };
+        Themed(b, Border.BackgroundProperty, "CardBackgroundFillColorDefaultBrush", CardBg);
+        Themed(b, Border.BorderBrushProperty, "CardStrokeColorDefaultBrush", CardBorder);
+        return b;
+    }
 
     public static Thumb Handle(double size, System.Windows.Input.Cursor cursor, Brush? fill = null)
-        => new()
-        {
-            Width = size, Height = size, Cursor = cursor,
-            Template = HandleTemplate(fill ?? Brushes.White),
-        };
+        => new() { Width = size, Height = size, Cursor = cursor, Template = HandleTemplate(fill ?? Brushes.White), Focusable = false };
 
     private static ControlTemplate HandleTemplate(Brush fill)
     {
         var t = new ControlTemplate(typeof(Thumb));
-        var f = new FrameworkElementFactory(typeof(System.Windows.Shapes.Rectangle));
+        var f = new FrameworkElementFactory(typeof(System.Windows.Shapes.Ellipse));
         f.SetValue(System.Windows.Shapes.Shape.FillProperty, fill);
         f.SetValue(System.Windows.Shapes.Shape.StrokeProperty, Brushes.Black);
         f.SetValue(System.Windows.Shapes.Shape.StrokeThicknessProperty, 1.0);
@@ -139,8 +162,8 @@ public static class Ui
         return t;
     }
 
-    public static Thumb TransparentThumb()
-        => new() { Template = TransparentTemplate(), Cursor = System.Windows.Input.Cursors.SizeAll, Background = Brushes.Transparent };
+    public static Thumb TransparentThumb(System.Windows.Input.Cursor? cursor = null)
+        => new() { Template = TransparentTemplate(), Cursor = cursor ?? System.Windows.Input.Cursors.SizeAll, Background = Brushes.Transparent, Focusable = false };
 
     private static ControlTemplate TransparentTemplate()
     {

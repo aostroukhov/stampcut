@@ -18,6 +18,10 @@ public sealed class AppSettings
     public bool AlwaysUseProxy { get; set; }
     public int ProxyLongSide { get; set; } = 960;
     public string Language { get; set; } = "ru";
+    /// <summary>Громкость просмотра 0..1.</summary>
+    public double Volume { get; set; } = 0.8;
+    /// <summary>Тема: system / light / dark.</summary>
+    public string Theme { get; set; } = "system";
 
     // --- «меньше кликов»: недавние папки и автоматические имена
     /// <summary>Куда класть экспорт: рядом с исходником, в последнюю использованную папку или в фиксированную (OutputDir).</summary>

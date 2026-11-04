@@ -6,6 +6,7 @@ using StampCut.App.Services;
 using StampCut.Core;
 using StampCut.Core.FFmpeg;
 using StampCut.Core.Models;
+using static StampCut.App.Lang;
 
 namespace StampCut.App;
 
@@ -21,16 +22,16 @@ public sealed partial class MainWindow
     private UIElement BuildExportBlock()
     {
         _exportPresetCombo = Ui.Combo(_exportPresets, p => p.Name, _preset, OnExportPresetSelected, width: 250);
-        _exportButton = Ui.Button("Экспорт", () => Fire(ExportAsync()), primary: true, tooltip: "Экспортировать (Ctrl+E)", minWidth: 120);
+        _exportButton = Ui.Button(T("Экспорт"), () => Fire(ExportAsync()), primary: true, tooltip: T("Экспортировать (Ctrl+E)"), minWidth: 120);
         _exportButton.FontSize = 14; _exportButton.Padding = new Thickness(16, 8, 16, 8);
-        var openFolder = Ui.SmallButton("Открыть папку", OpenLastFolder, "Открыть папку с результатом");
+        var openFolder = Ui.SmallButton(T("Открыть папку"), OpenLastFolder, T("Открыть папку с результатом"));
         var col = Ui.Column(
-            Ui.Header("ЭКСПОРТ"),
+            Ui.Header(T("ЭКСПОРТ")),
             _exportPresetCombo,
             _exportTarget,
             _exportDetails,
             Ui.Row(_exportButton, openFolder));
-        _exportTarget.Margin = new Thickness(0, 6, 0, 0);
+        _exportTarget.Margin = new Thickness(0, 4, 0, 0);
         _exportDetails.Margin = new Thickness(0, 0, 0, 8);
         return Ui.Card(col);
     }
@@ -43,7 +44,6 @@ public sealed partial class MainWindow
         UpdateOutputGeometry();
         UpdateExportInfo();
         _timeline.SnapToKeyframes = p.StreamCopy;
-        if (p.StreamCopy && _current is not null) Fire(LoadKeyframesAsync(_current));
         _timeline.InvalidateVisual();
     }
 
@@ -80,7 +80,7 @@ public sealed partial class MainWindow
 
     private void UpdateExportInfo()
     {
-        if (_clips.Count == 0) { _exportTarget.Text = "Добавьте ролик"; _exportDetails.Text = ""; _exportButton.IsEnabled = false; return; }
+        if (_clips.Count == 0) { _exportTarget.Text = T("Добавьте ролик"); _exportDetails.Text = ""; _exportButton.IsEnabled = false; return; }
         _exportButton.IsEnabled = _exportCts is null;
         var path = BuildOutputPath(_clips[0]);
         _exportTarget.Text = $"→ {Path.GetFileName(path)}\n{Path.GetDirectoryName(path)}";
@@ -88,13 +88,13 @@ public sealed partial class MainWindow
         {
             var job = new ExportJob { Clips = _clips, Preset = _preset, OutputPath = path, Encoder = HardwareEncoder.None };
             if (_preset.StreamCopy)
-                _exportDetails.Text = "Без перекодирования: потоки копируются как есть, секунды.";
+                _exportDetails.Text = T("Без перекодирования: потоки копируются как есть, секунды.");
             else
             {
                 var (w, h) = FFmpegCommandBuilder.ComputeOutputSize(job);
                 int fps = FFmpegCommandBuilder.ComputeOutputFps(job);
                 double total = job.TotalDurationSec;
-                _exportDetails.Text = $"{w}×{h} · {(fps > 0 ? fps + " к/с" : "частота исходника")} · {TimeFormat.Format(total, false)}" + (_clips.Count > 1 ? $" · {_clips.Count} ролика(ов)" : "");
+                _exportDetails.Text = $"{w}×{h} · {(fps > 0 ? fps + " " + T("к/с") : T("частота исходника"))} · {TimeFormat.Format(total, false)}" + (_clips.Count > 1 ? $" · {_clips.Count} {T("ролика(ов)")}" : "");
             }
         }
         catch (Exception ex) { _exportDetails.Text = ex.Message; }
@@ -122,17 +122,15 @@ public sealed partial class MainWindow
 
     private async Task ExportCoreAsync(CancellationToken ct)
     {
-
-        // оверлеи с файлами
         var resolved = new List<ResolvedOverlay>();
         foreach (var item in _overlays)
         {
             if (item.ResolvedPath is null || item.PngWidth == 0) continue;
             resolved.Add(new ResolvedOverlay { Settings = item.Settings, Path = item.ResolvedPath, Width = item.PngWidth, Height = item.PngHeight });
         }
-        if (_overlays.Count > resolved.Count) ShowInfo("У части оверлеев не выбран PNG-файл — они пропущены.", InfoKind.Warning);
+        if (_overlays.Count > resolved.Count) ShowInfo(T("У части оверлеев не выбран PNG-файл — они пропущены."), InfoKind.Warning);
 
-        _statusInfo.Text = "Проверяю GPU…";
+        _statusInfo.Text = T("Проверяю GPU…");
         await _s.HardwareReady;
         var encoder = _preset.StreamCopy ? HardwareEncoder.None : _s.ResolveEncoder(_preset);
         var outputPath = BuildOutputPath(_clips[0]);
@@ -146,12 +144,12 @@ public sealed partial class MainWindow
 
         _progress.Visibility = Visibility.Visible; _progress.Value = 0;
         _cancelButton.Visibility = Visibility.Visible;
-        _statusInfo.Text = $"Экспорт: {Path.GetFileName(outputPath)} · {HardwareDetector.DisplayName(encoder)}";
+        _statusInfo.Text = $"{T("Экспорт: ")}{Path.GetFileName(outputPath)} · {HardwareDetector.DisplayName(encoder)}";
         var sw = Stopwatch.StartNew();
         var progress = new Progress<ExportProgress>(p =>
         {
             _progress.Value = p.Fraction * 100;
-            _progressText.Text = $"{p.Fraction * 100:0}%" + (p.Remaining is { } r ? $" · осталось {TimeFormat.Format(r.TotalSeconds, false)}" : "") + (p.Speed > 0 ? $" · {p.Speed:0.0}×" : "");
+            _progressText.Text = $"{p.Fraction * 100:0}%" + (p.Remaining is { } r ? $" · {T("осталось")} {TimeFormat.Format(r.TotalSeconds, false)}" : "") + (p.Speed > 0 ? $" · {p.Speed:0.0}×" : "");
         });
         ExportOutcome outcome;
         try
@@ -164,25 +162,26 @@ public sealed partial class MainWindow
             Logger.Error("Экспорт", ex);
             outcome = new ExportOutcome(false, null, ex.Message, sw.Elapsed, "");
         }
+
         if (outcome.Success && outcome.OutputPath is not null)
         {
             _lastExportedFile = outcome.OutputPath;
             AppSettings.Touch(_s.Settings.RecentOutputDirs, Path.GetDirectoryName(outcome.OutputPath));
-            _s.Settings.Save();
-            _statusInfo.Text = $"Готово за {TimeFormat.Format(outcome.Elapsed.TotalSeconds, false)}: {Path.GetFileName(outcome.OutputPath)}";
-            ShowInfo($"Готово: {Path.GetFileName(outcome.OutputPath)} ({TimeFormat.FormatSize(new FileInfo(outcome.OutputPath).Length)}, {TimeFormat.Format(outcome.Elapsed.TotalSeconds, false)})", InfoKind.Success,
-                ("Показать в проводнике", () => RevealInExplorer(outcome.OutputPath)),
-                ("Открыть папку", OpenLastFolder),
-                ("Скопировать команду ffmpeg", () => { try { Clipboard.SetText(outcome.CommandLine); } catch { } }));
+            try { _s.Settings.Save(); } catch { }
+            _statusInfo.Text = $"{T("Готово за")} {TimeFormat.Format(outcome.Elapsed.TotalSeconds, false)}: {Path.GetFileName(outcome.OutputPath)}";
+            ShowInfo($"{T("Готово")}: {Path.GetFileName(outcome.OutputPath)} ({TimeFormat.FormatSize(new FileInfo(outcome.OutputPath).Length)}, {TimeFormat.Format(outcome.Elapsed.TotalSeconds, false)})", InfoKind.Success,
+                (T("Показать в проводнике"), () => RevealInExplorer(outcome.OutputPath)),
+                (T("Открыть папку"), OpenLastFolder),
+                (T("Скопировать команду ffmpeg"), () => { try { Clipboard.SetText(outcome.CommandLine); } catch { } }));
             if (_s.Settings.OpenFolderAfterExport) RevealInExplorer(outcome.OutputPath);
         }
         else
         {
             _statusInfo.Text = outcome.Message.Split('\n')[0];
             Logger.Error("Экспорт не удался: " + outcome.Message + "\n" + outcome.CommandLine);
-            ShowInfo(outcome.Message.Replace('\n', ' '), outcome.Message.Contains("отмен", StringComparison.OrdinalIgnoreCase) ? InfoKind.Warning : InfoKind.Error,
-                ("Скопировать команду ffmpeg", () => { try { Clipboard.SetText(outcome.CommandLine); } catch { } }),
-                ("Открыть журнал", () => TryStart(Logger.CurrentFile)));
+            ShowInfo(outcome.Message.Replace('\n', ' '), outcome.Message.Contains(T("Экспорт отменён"), StringComparison.OrdinalIgnoreCase) ? InfoKind.Warning : InfoKind.Error,
+                (T("Скопировать команду ffmpeg"), () => { try { Clipboard.SetText(outcome.CommandLine); } catch { } }),
+                (T("Открыть журнал"), () => TryStart(Logger.CurrentFile)));
         }
     }
 

@@ -16,7 +16,7 @@ public sealed class InputWindow : Window
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         _box.Text = initial;
         var ok = Ui.Button("OK", () => { DialogResult = true; Close(); }, primary: true, minWidth: 80);
-        var cancel = Ui.Button("Отмена", () => { DialogResult = false; Close(); }, minWidth: 80);
+        var cancel = Ui.Button(Lang.T("Отмена"), () => { DialogResult = false; Close(); }, minWidth: 80);
         ok.IsDefault = true; cancel.IsCancel = true;
         Content = new StackPanel
         {

@@ -26,12 +26,12 @@ public sealed class HardwareCapabilities
             if (Encoders.Contains(HardwareEncoder.Nvenc) || string.IsNullOrEmpty(NvencFailure)) return "";
             bool driverIssue = NvencFailure.Contains("nvenc API version", StringComparison.OrdinalIgnoreCase) ||
                                NvencFailure.Contains("driver", StringComparison.OrdinalIgnoreCase);
-            var gpu = string.IsNullOrEmpty(GpuName) ? "видеокарта NVIDIA" : GpuName;
-            var have = string.IsNullOrEmpty(NvidiaDriver) ? "" : $" (установлен драйвер {NvidiaDriver})";
+            var gpu = string.IsNullOrEmpty(GpuName) ? Loc.T("видеокарта NVIDIA") : GpuName;
+            var have = string.IsNullOrEmpty(NvidiaDriver) ? "" : $" ({Loc.T("установлен драйвер")} {NvidiaDriver})";
             if (driverIssue)
-                return $"{gpu}{have}: кодер NVENC не запускается, нужен драйвер NVIDIA {(string.IsNullOrEmpty(NvencRequiredDriver) ? "посвежее" : NvencRequiredDriver + " или новее")}. Обновите драйвер — экспорт станет в несколько раз быстрее.";
+                return $"{gpu}{have}: {Loc.T("кодер NVENC не запускается, нужен драйвер NVIDIA")} {(string.IsNullOrEmpty(NvencRequiredDriver) ? Loc.T("посвежее") : NvencRequiredDriver + Loc.T(" или новее"))}. {Loc.T("Обновите драйвер — экспорт станет в несколько раз быстрее.")}";
             if (!string.IsNullOrEmpty(GpuName) || !string.IsNullOrEmpty(NvidiaDriver))
-                return $"{gpu}{have}: кодер NVENC не запускается ({NvencFailure}). Проверьте драйвер NVIDIA.";
+                return $"{gpu}{have}: {Loc.T("кодер NVENC не запускается")} ({NvencFailure}). {Loc.T("Проверьте драйвер NVIDIA.")}";
             return "";
         }
     }
@@ -74,7 +74,7 @@ public sealed class HardwareDetector
         HardwareEncoder.Qsv => "Intel Quick Sync",
         HardwareEncoder.Amf => "AMD AMF",
         HardwareEncoder.MediaFoundation => "Media Foundation",
-        HardwareEncoder.Auto => "автоматически",
+        HardwareEncoder.Auto => Loc.T("автоматически"),
         _ => "CPU (libx264)",
     };
 

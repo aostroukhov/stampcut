@@ -50,10 +50,10 @@ public sealed class MediaInfo
             if (IsHdr) codec += " HDR";
             parts.Add(codec);
             parts.Add($"{Width}×{Height}");
-            parts.Add($"{Fps:0.##} к/с" + (IsVfr ? " (переменная)" : ""));
+            parts.Add($"{Fps:0.##} {Loc.T("к/с")}" + (IsVfr ? Loc.T(" (переменная)") : ""));
         }
-        else parts.Add("без видео");
-        parts.Add(HasAudio ? $"{AudioCodec.ToUpperInvariant()} {Channels}ch" : "без звука");
+        else parts.Add(Loc.T("без видео"));
+        parts.Add(HasAudio ? $"{AudioCodec.ToUpperInvariant()} {Channels}ch" : Loc.T("без звука"));
         parts.Add(TimeFormat.Format(DurationSec));
         parts.Add(TimeFormat.FormatSize(SizeBytes));
         return string.Join(" · ", parts);

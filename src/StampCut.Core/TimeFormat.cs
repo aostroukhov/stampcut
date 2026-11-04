@@ -34,10 +34,10 @@ public static class TimeFormat
 
     public static string FormatSize(long bytes)
     {
-        if (bytes >= 1L << 30) return $"{bytes / (double)(1L << 30):0.0} ГБ";
-        if (bytes >= 1L << 20) return $"{bytes / (double)(1L << 20):0} МБ";
-        if (bytes >= 1L << 10) return $"{bytes / (double)(1L << 10):0} КБ";
-        return $"{bytes} Б";
+        if (bytes >= 1L << 30) return $"{bytes / (double)(1L << 30):0.0} {Loc.T("ГБ")}";
+        if (bytes >= 1L << 20) return $"{bytes / (double)(1L << 20):0} {Loc.T("МБ")}";
+        if (bytes >= 1L << 10) return $"{bytes / (double)(1L << 10):0} {Loc.T("КБ")}";
+        return $"{bytes} {Loc.T("Б")}";
     }
 
     /// <summary>Число для командной строки ffmpeg: точка как разделитель, без экспоненты.</summary>

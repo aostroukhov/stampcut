@@ -13,23 +13,40 @@ public sealed partial class MainWindow
     private bool _mediaReady;
     private bool _playing;
     private bool _usingProxy;
+    private bool _followEdit = true;
     private double _lastPosition;
     private double _pendingSeek = -1;
+    private bool _autoplayOnOpen = true;
     private CancellationTokenSource? _proxyCts;
+    private Segment? _activeSegment;
 
     private double Position => _mediaReady ? _preview.Player.Position.TotalSeconds : _lastPosition;
 
-    private async Task LoadIntoPlayerAsync(Clip clip)
+    /// <summary>Фрагмент, с которым работают I/O и кнопки: выбранный на ленте или содержащий позицию, или первый.</summary>
+    private Segment? ActiveSegment
+    {
+        get
+        {
+            if (_current is null) return null;
+            if (_activeSegment is not null && _current.Segments.Contains(_activeSegment)) return _activeSegment;
+            _activeSegment = _current.Segments.FirstOrDefault(s => s.Contains(Position)) ?? _current.Segments.FirstOrDefault();
+            return _activeSegment;
+        }
+    }
+
+    private async Task LoadIntoPlayerAsync(Clip clip, double? startAt = null, bool autoplay = true)
     {
         _proxyCts?.Cancel();
         var cts = new CancellationTokenSource();
         _proxyCts = cts;
         Pause();
         _mediaReady = false;
-        _lastPosition = clip.InSec;
+        double start = startAt ?? clip.InSec;
+        _lastPosition = start;
+        _autoplayOnOpen = autoplay;
         _preview.Player.Source = null;
         _preview.ShowMessage(null);
-        _ = ShowPosterAsync(clip, cts.Token);
+        _ = ShowPosterAsync(clip, start, cts.Token);
 
         string path;
         bool needProxy = clip.Media.NeedsProxy || _s.Settings.AlwaysUseProxy;
@@ -58,7 +75,7 @@ public sealed partial class MainWindow
         if (cts.IsCancellationRequested) return;
         _preview.ShowMessage(null);
         _usingProxy = path != clip.Media.Path;
-        OpenInPlayer(path, clip.InSec);
+        OpenInPlayer(path, start);
     }
 
     private void OpenInPlayer(string path, double startAt)
@@ -71,15 +88,55 @@ public sealed partial class MainWindow
         _playButton.Content = "⏸";
     }
 
+    private readonly System.Windows.Threading.DispatcherTimer _filterTimer = new() { Interval = TimeSpan.FromMilliseconds(350) };
+    private CancellationTokenSource? _filterCts;
+
+    /// <summary>На паузе показываем кадр с фильтрами (его считает ffmpeg), при воспроизведении — исходник.</summary>
+    private void RequestFilteredFrame()
+    {
+        _filterTimer.Stop();
+        if (_current is null || _playing || !_mediaReady) return;
+        if (_current.Filters.IsDefault) { _preview.HidePoster(); return; }
+        _filterTimer.Tick -= OnFilterTimer; _filterTimer.Tick += OnFilterTimer;
+        _filterTimer.Start();
+    }
+
+    private void OnFilterTimer(object? sender, EventArgs e)
+    {
+        _filterTimer.Stop();
+        if (_current is null || _playing) return;
+        _filterCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        _filterCts = cts;
+        var clip = _current;
+        double at = Position;
+        Fire(Task.Run(async () =>
+        {
+            var path = await _proxy.PosterAsync(clip.Media, at, cts.Token, clip.Filters.Clone());
+            if (path is null || cts.IsCancellationRequested) return;
+            await Dispatcher.InvokeAsync(() =>
+            {
+                if (!ReferenceEquals(clip, _current) || _playing || cts.IsCancellationRequested) return;
+                var bmp = new BitmapImage();
+                bmp.BeginInit(); bmp.CacheOption = BitmapCacheOption.OnLoad; bmp.CreateOptions = BitmapCreateOptions.IgnoreImageCache; bmp.UriSource = Ui.FileUri(path); bmp.EndInit(); bmp.Freeze();
+                _preview.ShowPoster(bmp);
+            });
+        }));
+    }
+
     private void OnMediaOpened()
     {
         _mediaReady = true;
+        ApplyGainToPlayer();
         _preview.HidePoster();
-        if (_pendingSeek > 0.01) { _preview.Player.Position = TimeSpan.FromSeconds(_pendingSeek); }
+        if (_pendingSeek > 0.01) _preview.Player.Position = TimeSpan.FromSeconds(_pendingSeek);
         _pendingSeek = -1;
         _timer.Start();
         _preview.Refresh();
+        if (!_autoplayOnOpen) Pause();
     }
+
+    private void RefreshFilteredFrameIfPaused() { if (!_playing) RequestFilteredFrame(); }
 
     private void OnMediaFailed(Exception? ex)
     {
@@ -89,9 +146,9 @@ public sealed partial class MainWindow
         if (_current is null) return;
         if (!_usingProxy)
         {
-            // плеер Windows не справился — делаем прокси, как для HEVC
             _preview.ShowMessage("Готовлю просмотр…");
             var clip = _current;
+            double start = _lastPosition;
             _ = Task.Run(async () =>
             {
                 try
@@ -104,10 +161,10 @@ public sealed partial class MainWindow
                         if (!ReferenceEquals(clip, _current)) return;
                         _preview.ShowMessage(null);
                         _usingProxy = true;
-                        OpenInPlayer(path, clip.InSec);
+                        OpenInPlayer(path, start);
                     });
                 }
-                catch (OperationCanceledException) { /* выбран другой ролик */ }
+                catch (OperationCanceledException) { }
                 catch (Exception e2)
                 {
                     Logger.Error("Прокси после сбоя плеера", e2);
@@ -118,18 +175,14 @@ public sealed partial class MainWindow
         else _preview.ShowMessage("Не удалось открыть видео для просмотра.\n" + ex?.Message);
     }
 
-    private async Task ShowPosterAsync(Clip clip, CancellationToken ct)
+    private async Task ShowPosterAsync(Clip clip, double atSec, CancellationToken ct)
     {
         try
         {
-            var path = await _proxy.PosterAsync(clip.Media, clip.InSec, ct);
+            var path = await _proxy.PosterAsync(clip.Media, atSec, ct);
             if (path is null || ct.IsCancellationRequested || _mediaReady) return;
             var bmp = new BitmapImage();
-            bmp.BeginInit();
-            bmp.CacheOption = BitmapCacheOption.OnLoad;
-            bmp.UriSource = Ui.FileUri(path);
-            bmp.EndInit();
-            bmp.Freeze();
+            bmp.BeginInit(); bmp.CacheOption = BitmapCacheOption.OnLoad; bmp.UriSource = Ui.FileUri(path); bmp.EndInit(); bmp.Freeze();
             if (!_mediaReady && ReferenceEquals(clip, _current)) _preview.ShowPoster(bmp);
         }
         catch (Exception ex) { Logger.Warn("Постер: " + ex.Message); }
@@ -140,11 +193,30 @@ public sealed partial class MainWindow
         if (!_mediaReady || _current is null) return;
         double pos = _preview.Player.Position.TotalSeconds;
         _lastPosition = pos;
-        if (_playing && pos >= _current.OutSec - 0.02 && _current.OutSec < _current.Media.DurationSec - 0.02)
+        if (_playing && _followEdit)
         {
-            Pause();
-            Seek(_current.OutSec);
-            return;
+            var segs = _current.OrderedSegments();
+            var inside = segs.FirstOrDefault(s => s.Contains(pos));
+            if (inside is null || pos >= inside.OutSec - 0.02)
+            {
+                // конец фрагмента или «дырка»: следующий фрагмент этого ролика, иначе следующий ролик, иначе стоп
+                var next = segs.FirstOrDefault(s => s.InSec > pos + 0.02 && !ReferenceEquals(s, inside));
+                if (inside is not null && pos < inside.OutSec - 0.02) next = null;
+                if (next is not null) { _activeSegment = next; Seek(next.InSec); UpdateTimeUi(next.InSec); return; }
+                int idx = _clips.IndexOf(_current);
+                if (inside is not null || segs.Count == 0 || pos > segs[^1].OutSec - 0.02)
+                {
+                    if (idx >= 0 && idx + 1 < _clips.Count)
+                    {
+                        var nc = _clips[idx + 1];
+                        SelectClip(nc, startAt: nc.OrderedSegments().FirstOrDefault()?.InSec ?? 0, autoplay: true);
+                        return;
+                    }
+                    Pause();
+                    if (inside is not null) Seek(inside.OutSec);
+                    return;
+                }
+            }
         }
         UpdateTimeUi(pos);
     }
@@ -153,6 +225,7 @@ public sealed partial class MainWindow
     {
         if (_current is null) return;
         _timeline.Position = pos;
+        _timeline.ActiveSegment = ActiveSegment;
         _timeline.InvalidateVisual();
         _preview.CurrentTimeSec = pos;
         _preview.OutputTimeSec = OutputTime();
@@ -168,6 +241,7 @@ public sealed partial class MainWindow
         if (_mediaReady) _preview.Player.Position = TimeSpan.FromSeconds(t);
         else _pendingSeek = t;
         UpdateTimeUi(t);
+        RefreshFilteredFrameIfPaused();
     }
 
     private void TogglePlay()
@@ -175,7 +249,20 @@ public sealed partial class MainWindow
         if (_current is null) return;
         if (_playing) { Pause(); return; }
         if (!_mediaReady) return;
-        if (Position >= _current.OutSec - 0.02) Seek(_current.InSec);
+        if (_followEdit)
+        {
+            var segs = _current.OrderedSegments();
+            var inside = segs.FirstOrDefault(s => s.Contains(Position) && Position < s.OutSec - 0.05);
+            if (inside is null)
+            {
+                var next = segs.FirstOrDefault(s => s.InSec > Position) ?? segs.FirstOrDefault();
+                if (next is not null) { _activeSegment = next; Seek(next.InSec); }
+            }
+        }
+        else if (Position >= _current.Media.DurationSec - 0.05) Seek(0);
+        _filterTimer.Stop();
+        _filterCts?.Cancel();
+        _preview.HidePoster();
         _preview.Player.Play();
         _playing = true;
         _playButton.Content = "⏸";
@@ -186,6 +273,7 @@ public sealed partial class MainWindow
         if (_mediaReady) _preview.Player.Pause();
         _playing = false;
         _playButton.Content = "▶";
+        RequestFilteredFrame();
     }
 
     private void StepFrame(int direction)
@@ -198,24 +286,51 @@ public sealed partial class MainWindow
 
     private void SetInHere()
     {
-        if (_current is null) return;
+        if (ActiveSegment is not { } seg) return;
         double t = _timeline.Snap(Position);
-        _current.InSec = Math.Min(t, _current.OutSec - 0.05);
+        seg.InSec = Math.Min(t, seg.OutSec - 0.05);
         AfterTrimChanged();
     }
 
     private void SetOutHere()
     {
+        if (ActiveSegment is not { } seg) return;
+        double t = _timeline.Snap(Position);
+        seg.OutSec = Math.Max(t, seg.InSec + 0.05);
+        AfterTrimChanged();
+    }
+
+    /// <summary>Новый фрагмент от текущей позиции до начала следующего фрагмента (или до конца ролика).</summary>
+    private void AddSegmentHere()
+    {
         if (_current is null) return;
         double t = _timeline.Snap(Position);
-        _current.OutSec = Math.Max(t, _current.InSec + 0.05);
+        var seg = new Segment { InSec = t, OutSec = _current.Media.DurationSec };
+        var next = _current.OrderedSegments().FirstOrDefault(s => s.InSec > t + 0.05);
+        if (next is not null) seg.OutSec = next.InSec;
+        var inside = _current.Segments.FirstOrDefault(s => s.Contains(t) && s.OutSec - t > 0.1);
+        if (inside is not null) { seg.OutSec = inside.OutSec; inside.OutSec = t; } // режем текущий фрагмент пополам
+        if (seg.DurationSec < 0.05) { ShowInfo("Здесь нет места для нового фрагмента.", InfoKind.Warning); return; }
+        _current.Segments.Add(seg);
+        _activeSegment = seg;
+        AfterTrimChanged();
+    }
+
+    private void RemoveActiveSegment()
+    {
+        if (_current is null || ActiveSegment is not { } seg) return;
+        _current.Segments.Remove(seg);
+        if (_current.Segments.Count == 0) _current.Segments.Add(new Segment { InSec = 0, OutSec = _current.Media.DurationSec });
+        _activeSegment = null;
         AfterTrimChanged();
     }
 
     private void ResetTrim()
     {
         if (_current is null) return;
-        _current.InSec = 0; _current.OutSec = _current.Media.DurationSec;
+        _current.Segments.Clear();
+        _current.Segments.Add(new Segment { InSec = 0, OutSec = _current.Media.DurationSec });
+        _activeSegment = null;
         AfterTrimChanged();
     }
 
@@ -223,10 +338,13 @@ public sealed partial class MainWindow
     private void AfterTrimChanged(bool light = false)
     {
         if (_current is null) return;
-        _timeline.InPoint = _current.InSec; _timeline.OutPoint = _current.OutSec;
+        _timeline.Segments = _current.Segments;
+        _timeline.ActiveSegment = ActiveSegment;
         _timeline.InvalidateVisual();
-        bool trimmed = _current.InSec > 0.01 || _current.OutSec < _current.Media.DurationSec - 0.01;
-        _fragmentText.Text = trimmed ? $"фрагмент {TimeFormat.Format(_current.InSec, false)}–{TimeFormat.Format(_current.OutSec, false)} ({TimeFormat.Format(_current.DurationSec, false)})" : "";
+        var segs = _current.OrderedSegments();
+        _fragmentText.Text = !_current.IsTrimmed ? "весь ролик"
+            : segs.Count == 1 ? $"фрагмент {TimeFormat.Format(segs[0].InSec, false)}–{TimeFormat.Format(segs[0].OutSec, false)} ({TimeFormat.Format(_current.DurationSec, false)})"
+            : $"фрагментов: {segs.Count}, итого {TimeFormat.Format(_current.DurationSec, false)}";
         if (light) return;
         RefreshClipList();
         UpdateExportInfo();

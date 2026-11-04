@@ -19,9 +19,9 @@ public sealed class AppServices
     /// <summary>Рекомендация по драйверу (из свежей проверки или из кэша).</summary>
     public string CachedRecommendation { get; private set; } = "";
 
-    public AppServices()
+    public AppServices(AppSettings? settings = null)
     {
-        Settings = AppSettings.Load();
+        Settings = settings ?? AppSettings.Load();
         Ffmpeg = FFmpegPaths.Locate(Settings.FfmpegDir);
         Probe = new MediaProbe(Ffmpeg);
         Presets = new PresetStore(AppPaths.PresetsDir, Settings.LibraryDir);
