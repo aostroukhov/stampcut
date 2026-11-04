@@ -114,7 +114,7 @@ public sealed partial class MainWindow
         finally
         {
             _exportCts = null;
-            _progress.Visibility = Visibility.Collapsed; _progressText.Text = ""; _cancelButton.Visibility = Visibility.Collapsed;
+            _exportProgress.Visibility = Visibility.Collapsed; _exportStatus.Text = ""; _cancelButton.Visibility = Visibility.Collapsed;
             _exportButton.IsEnabled = true;
             UpdateExportInfo();
         }
@@ -130,6 +130,7 @@ public sealed partial class MainWindow
         }
         if (_overlays.Count > resolved.Count) ShowInfo(T("У части оверлеев не выбран PNG-файл — они пропущены."), InfoKind.Warning);
 
+        Autosave("export");
         _statusInfo.Text = T("Проверяю GPU…");
         await _s.HardwareReady;
         var encoder = _preset.StreamCopy ? HardwareEncoder.None : _s.ResolveEncoder(_preset);
@@ -142,14 +143,15 @@ public sealed partial class MainWindow
         var errors = FFmpegCommandBuilder.Validate(job);
         if (errors.Count > 0) { ShowInfo(string.Join(" ", errors), InfoKind.Error); _statusInfo.Text = ""; return; }
 
-        _progress.Visibility = Visibility.Visible; _progress.Value = 0;
+        _exportProgress.Visibility = Visibility.Visible; _exportProgress.Value = 0;
         _cancelButton.Visibility = Visibility.Visible;
+        _exportStatus.Text = $"{Path.GetFileName(outputPath)} · {HardwareDetector.DisplayName(encoder)}";
         _statusInfo.Text = $"{T("Экспорт: ")}{Path.GetFileName(outputPath)} · {HardwareDetector.DisplayName(encoder)}";
         var sw = Stopwatch.StartNew();
         var progress = new Progress<ExportProgress>(p =>
         {
-            _progress.Value = p.Fraction * 100;
-            _progressText.Text = $"{p.Fraction * 100:0}%" + (p.Remaining is { } r ? $" · {T("осталось")} {TimeFormat.Format(r.TotalSeconds, false)}" : "") + (p.Speed > 0 ? $" · {p.Speed:0.0}×" : "");
+            _exportProgress.Value = p.Fraction * 100;
+            _exportStatus.Text = $"{p.Fraction * 100:0}%" + (p.Remaining is { } r ? $" · {T("осталось")} {TimeFormat.Format(r.TotalSeconds, false)}" : "") + (p.Speed > 0 ? $" · {p.Speed:0.0}×" : "") + $" · {Path.GetFileName(outputPath)}";
         });
         ExportOutcome outcome;
         try
@@ -167,7 +169,14 @@ public sealed partial class MainWindow
         {
             _lastExportedFile = outcome.OutputPath;
             AppSettings.Touch(_s.Settings.RecentOutputDirs, Path.GetDirectoryName(outcome.OutputPath));
+            _s.Settings.ExportHistory.Insert(0, new ExportRecord
+            {
+                Path = outcome.OutputPath, At = DateTime.Now, DurationSec = job.TotalDurationSec, ElapsedSec = outcome.Elapsed.TotalSeconds,
+                SizeBytes = new FileInfo(outcome.OutputPath).Length, Project = _projectPath,
+            });
+            if (_s.Settings.ExportHistory.Count > 50) _s.Settings.ExportHistory.RemoveRange(50, _s.Settings.ExportHistory.Count - 50);
             try { _s.Settings.Save(); } catch { }
+            RefreshHistoryList();
             _statusInfo.Text = $"{T("Готово за")} {TimeFormat.Format(outcome.Elapsed.TotalSeconds, false)}: {Path.GetFileName(outcome.OutputPath)}";
             ShowInfo($"{T("Готово")}: {Path.GetFileName(outcome.OutputPath)} ({TimeFormat.FormatSize(new FileInfo(outcome.OutputPath).Length)}, {TimeFormat.Format(outcome.Elapsed.TotalSeconds, false)})", InfoKind.Success,
                 (T("Показать в проводнике"), () => RevealInExplorer(outcome.OutputPath)),

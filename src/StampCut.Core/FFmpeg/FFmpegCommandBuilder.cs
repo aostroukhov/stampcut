@@ -39,6 +39,7 @@ public static class FFmpegCommandBuilder
         }
         if (job.Preset.StreamCopy)
         {
+            if (job.Clips.Any(c => c.Media.IsImage)) errors.Add(Loc.T("Фото нельзя экспортировать без перекодирования: выберите другой пресет экспорта."));
             if (job.Overlays.Count > 0) errors.Add(Loc.T("Оверлей невозможен без перекодирования: выберите другой пресет экспорта."));
             if (job.Clips.Any(c => c.Crop is { IsFull: false })) errors.Add(Loc.T("Кроп невозможен без перекодирования: выберите другой пресет экспорта."));
             if (job.Clips.Any(c => c.Redactions.Count > 0)) errors.Add(Loc.T("Ретушь невозможна без перекодирования: выберите другой пресет экспорта."));
@@ -136,21 +137,30 @@ public static class FFmpegCommandBuilder
         // --- входы: по одному на фрагмент
         var parts = Parts(job);
         int n = parts.Count;
-        bool anyAudio = job.Clips.Any(c => c.Media.HasAudio);
+        bool anyAudio = job.Clips.Any(c => c.Media.HasAudio && !c.IsMuted);
         var audioInputIndex = new int[n];
         int inputIndex = 0;
+        int inputFps = r.OutputFps > 0 ? r.OutputFps : Math.Max(1, (int)Math.Round(job.Clips.Where(c => !c.Media.IsImage).Select(c => c.Media.Fps).DefaultIfEmpty(30).Max()));
         for (int i = 0; i < n; i++)
         {
             var (c, seg) = parts[i];
+            if (c.Media.IsImage)
+            {
+                // фото: зациклить один кадр на длительность фрагмента
+                a.AddRange(new[] { "-loop", "1", "-framerate", inputFps.ToString(), "-t", Num(seg.DurationSec), "-i", c.Media.Path });
+                audioInputIndex[i] = -1;
+                inputIndex++;
+                continue;
+            }
             if (!string.IsNullOrEmpty(job.HwAccel)) a.AddRange(new[] { "-hwaccel", job.HwAccel });
             AddTrim(a, c, seg);
             a.AddRange(new[] { "-i", c.Media.Path });
-            audioInputIndex[i] = c.Media.HasAudio ? inputIndex : -1;
+            audioInputIndex[i] = c.Media.HasAudio && !c.IsMuted ? inputIndex : -1;
             inputIndex++;
         }
         if (anyAudio)
             for (int i = 0; i < n; i++)
-                if (!parts[i].Clip.Media.HasAudio)
+                if (audioInputIndex[i] < 0)
                 {
                     a.AddRange(new[] { "-f", "lavfi", "-t", Num(parts[i].Segment.DurationSec), "-i", $"anullsrc=channel_layout=stereo:sample_rate={p.SampleRate}" });
                     audioInputIndex[i] = inputIndex++;
@@ -161,7 +171,7 @@ public static class FFmpegCommandBuilder
             {
                 beepInputIndex[i] = -1;
                 var (c, seg) = parts[i];
-                if (c.Censors.Any(x => x.Mode == CensorMode.Beep && x.ToSec > x.FromSec && x.ToSec > seg.InSec && x.FromSec < seg.OutSec))
+                if (!c.IsMuted && c.Media.HasAudio && c.Censors.Any(x => x.Mode == CensorMode.Beep && x.ToSec > x.FromSec && x.ToSec > seg.InSec && x.FromSec < seg.OutSec))
                 {
                     a.AddRange(new[] { "-f", "lavfi", "-t", Num(seg.DurationSec), "-i", $"sine=frequency=1000:sample_rate={p.SampleRate}" });
                     beepInputIndex[i] = inputIndex++;
@@ -239,8 +249,8 @@ public static class FFmpegCommandBuilder
     private static void BuildAudioChain(StringBuilder g, Clip c, Segment seg, int i, int audioInput, int beepInput, ExportPreset p)
     {
         var af = new List<string> { $"aresample={p.SampleRate}", "aformat=sample_fmts=fltp:channel_layouts=stereo" };
-        if (Math.Abs(c.AudioGainDb) >= 0.05) af.Add($"volume={Num(Math.Clamp(c.AudioGainDb, -30, 30))}dB");
-        var segments = c.Censors.Where(x => x.ToSec > x.FromSec)
+        if (Math.Abs(c.AudioGainDb) >= 0.05) af.Add($"volume={Num(Math.Clamp(c.AudioGainDb, Clip.MuteDb, Clip.MaxGainDb))}dB");
+        var segments = (c.Media.HasAudio ? c.Censors : new List<AudioCensor>()).Where(x => x.ToSec > x.FromSec)
             .Select(x => (From: Math.Max(0, x.FromSec - seg.InSec), To: Math.Max(0, Math.Min(x.ToSec, seg.OutSec) - seg.InSec), x.Mode))
             .Where(x => x.To > x.From).ToList();
         if (segments.Count == 0)
@@ -389,14 +399,15 @@ public static class FFmpegCommandBuilder
     {
         var p = job.Preset;
         int max = p.MaxFps > 0 ? p.MaxFps : 60;
-        if (job.Clips.Count == 1) // несколько фрагментов одного файла — одна и та же частота, fps-фильтр не нужен
+        if (job.Clips.Count == 1 && !job.Clips[0].Media.IsImage) // несколько фрагментов одного файла — одна и та же частота, fps-фильтр не нужен
         {
             var m = job.Clips[0].Media;
             if (m.Fps > max + 0.01) return max;
             if (m.IsVfr) return Math.Min(max, Math.Max(1, (int)Math.Round(m.AvgFps > 0 ? m.AvgFps : m.Fps)));
             return 0;
         }
-        int best = job.Clips.Max(c => (int)Math.Round(c.Media.Fps > 0 ? c.Media.Fps : 30));
+        // фото не задают частоту: берём частоту видеороликов, без них — 30
+        int best = job.Clips.Where(c => !c.Media.IsImage).Select(c => (int)Math.Round(c.Media.Fps > 0 ? c.Media.Fps : 30)).DefaultIfEmpty(30).Max();
         return Math.Min(max, Math.Max(1, best));
     }
 
@@ -419,6 +430,7 @@ public static class FFmpegCommandBuilder
         foreach (var c in job.Clips)
         {
             var m = c.Media;
+            if (m.IsImage) continue;
             double src = m.VideoBitrate;
             if (src <= 0 && m.DurationSec > 0 && m.SizeBytes > 0) src = m.SizeBytes * 8.0 / m.DurationSec * 0.9; // без точных данных: по размеру файла минус звук
             if (src <= 0) continue;

@@ -4,7 +4,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
-    <Version>0.2.2</Version>
+    <Version>0.3.0</Version>
     <Authors>StampCut</Authors>
     <Product>StampCut</Product>
     <SatelliteResourceLanguages>en;ru</SatelliteResourceLanguages>

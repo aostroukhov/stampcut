@@ -58,6 +58,13 @@ public sealed class MediaProbe
         long size = Long(format, "size");
         if (size == 0) { try { size = new FileInfo(path).Length; } catch { } }
 
+        // фото: image2/png_pipe/jpeg_pipe и кодеки картинок; длительности у них нет
+        var formatName = Str(format, "format_name");
+        bool imageContainer = formatName.Contains("image2", StringComparison.Ordinal) || formatName.EndsWith("_pipe", StringComparison.Ordinal) || formatName.Contains("heif", StringComparison.Ordinal);
+        bool imageCodec = vcodec is "mjpeg" or "png" or "webp" or "bmp" or "tiff" or "gif" or "heif";
+        bool isImage = hasVideo && (imageContainer || (imageCodec && duration <= 0));
+        if (isImage) { duration = MediaInfo.ImageMaxDurationSec; fps = 0; avg = 0; }
+
         return new MediaInfo
         {
             Path = path,
@@ -77,7 +84,8 @@ public sealed class MediaProbe
             AudioCodec = audio.ValueKind == JsonValueKind.Object ? Str(audio, "codec_name") : "",
             SampleRate = audio.ValueKind == JsonValueKind.Object ? Int(audio, "sample_rate") : 0,
             Channels = audio.ValueKind == JsonValueKind.Object ? Int(audio, "channels") : 0,
-            Container = Str(format, "format_name"),
+            Container = formatName,
+            IsImage = isImage,
         };
     }
 

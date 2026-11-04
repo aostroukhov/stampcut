@@ -58,7 +58,18 @@ public static class ProjectStore
 
     public static void Save(string path, IEnumerable<Clip> clips, IEnumerable<OverlaySettings> overlays, string exportPresetId)
     {
-        var pf = new ProjectFile { SavedAtUtc = DateTime.UtcNow, ExportPresetId = exportPresetId };
+        var pf = ToFile(clips, overlays, exportPresetId);
+        var tmp = path + ".tmp";
+        File.WriteAllText(tmp, JsonSerializer.Serialize(pf, Json));
+        File.Move(tmp, path, overwrite: true);
+    }
+
+    public static string Serialize(ProjectFile pf) => JsonSerializer.Serialize(pf, Json);
+
+    /// <summary>Снимок состояния проекта (для истории изменений и проверки «есть несохранённое»).</summary>
+    public static ProjectFile ToFile(IEnumerable<Clip> clips, IEnumerable<OverlaySettings> overlays, string exportPresetId)
+    {
+        var pf = new ProjectFile { ExportPresetId = exportPresetId };
         foreach (var c in clips)
         {
             var e = new ProjectFile.ClipEntry { Path = c.Media.Path, AudioGainDb = c.AudioGainDb };
@@ -70,14 +81,49 @@ public static class ProjectStore
             pf.Clips.Add(e);
         }
         foreach (var o in overlays) pf.Overlays.Add(OverlayPresetFile.FromModel(o));
-        var tmp = path + ".tmp";
-        File.WriteAllText(tmp, JsonSerializer.Serialize(pf, Json));
-        File.Move(tmp, path, overwrite: true);
+        return pf;
     }
+
+    /// <summary>Восстановление из снимка: медиа берутся из кэша (без ffprobe).</summary>
+    public static ProjectLoadResult FromFile(ProjectFile pf, Func<string, MediaInfo?> media)
+    {
+        var result = new ProjectLoadResult { ExportPresetId = pf.ExportPresetId };
+        foreach (var e in pf.Clips)
+        {
+            var m = media(e.Path);
+            if (m is null) { result.Warnings.Add($"{Loc.T("Файл не найден:")} {e.Path}"); continue; }
+            result.Clips.Add(ClipFromEntry(e, m));
+        }
+        foreach (var o in pf.Overlays) result.Overlays.Add(o.ToModel(Guid.NewGuid().ToString("N")));
+        return result;
+    }
+
+    private static Clip ClipFromEntry(ProjectFile.ClipEntry e, MediaInfo media)
+    {
+        var clip = Clip.FromMedia(media);
+        if (e.Segments.Count > 0)
+        {
+            clip.Segments.Clear();
+            foreach (var s in e.Segments) clip.Segments.Add(new Segment { InSec = Math.Clamp(s.In, 0, media.DurationSec), OutSec = Math.Clamp(s.Out, 0, media.DurationSec) });
+        }
+        if (e.Crop is { } cr) clip.Crop = new CropRect { X = Math.Clamp(cr.X, 0, 1), Y = Math.Clamp(cr.Y, 0, 1), W = Math.Clamp(cr.W, 0.01, 1), H = Math.Clamp(cr.H, 0.01, 1) };
+        clip.AudioGainDb = e.AudioGainDb;
+        if (e.Filters is { } f) clip.Filters = new VideoFilters { Shadows = f.Shadows, Highlights = f.Highlights, Saturation = f.Saturation, Brightness = f.Brightness, Contrast = f.Contrast };
+        foreach (var r in e.Redactions)
+        {
+            double w = Math.Clamp(r.W, 0.01, 1), h = Math.Clamp(r.H, 0.01, 1);
+            clip.Redactions.Add(new RedactRegion { X = Math.Clamp(r.X, 0, 1 - w), Y = Math.Clamp(r.Y, 0, 1 - h), W = w, H = h, Mode = r.Mode == "pixelate" ? RedactMode.Pixelate : RedactMode.Blur, BlockSize = Math.Max(0, r.BlockSize), BlurRadius = Math.Max(0, r.BlurRadius), FromSec = r.From, ToSec = r.To });
+        }
+        foreach (var x in e.Censors)
+            clip.Censors.Add(new AudioCensor { FromSec = x.From, ToSec = x.To, Mode = x.Mode == "mute" ? CensorMode.Mute : CensorMode.Beep });
+        return clip;
+    }
+
+    public static ProjectFile Parse(string json) => JsonSerializer.Deserialize<ProjectFile>(json, Json) ?? throw new InvalidOperationException(Loc.T("Файл проекта пуст или повреждён."));
 
     public static async Task<ProjectLoadResult> LoadAsync(string path, MediaProbe probe, CancellationToken ct = default)
     {
-        var pf = JsonSerializer.Deserialize<ProjectFile>(await File.ReadAllTextAsync(path, ct), Json) ?? throw new InvalidOperationException(Loc.T("Файл проекта пуст или повреждён."));
+        var pf = Parse(await File.ReadAllTextAsync(path, ct));
         var result = new ProjectLoadResult { ExportPresetId = pf.ExportPresetId };
         var projectDir = Path.GetDirectoryName(path) ?? "";
         foreach (var e in pf.Clips)
@@ -93,23 +139,7 @@ public static class ProjectStore
             MediaInfo media;
             try { media = await probe.ProbeAsync(file, ct); }
             catch (Exception ex) { result.Warnings.Add($"{Path.GetFileName(file)}: {ex.Message}"); continue; }
-            var clip = Clip.FromMedia(media);
-            if (e.Segments.Count > 0)
-            {
-                clip.Segments.Clear();
-                foreach (var s in e.Segments) clip.Segments.Add(new Segment { InSec = Math.Clamp(s.In, 0, media.DurationSec), OutSec = Math.Clamp(s.Out, 0, media.DurationSec) });
-            }
-            if (e.Crop is { } cr) clip.Crop = new CropRect { X = Math.Clamp(cr.X, 0, 1), Y = Math.Clamp(cr.Y, 0, 1), W = Math.Clamp(cr.W, 0.01, 1), H = Math.Clamp(cr.H, 0.01, 1) };
-            clip.AudioGainDb = e.AudioGainDb;
-            if (e.Filters is { } f) clip.Filters = new VideoFilters { Shadows = f.Shadows, Highlights = f.Highlights, Saturation = f.Saturation, Brightness = f.Brightness, Contrast = f.Contrast };
-            foreach (var r in e.Redactions)
-            {
-                double w = Math.Clamp(r.W, 0.01, 1), h = Math.Clamp(r.H, 0.01, 1);
-                clip.Redactions.Add(new RedactRegion { X = Math.Clamp(r.X, 0, 1 - w), Y = Math.Clamp(r.Y, 0, 1 - h), W = w, H = h, Mode = r.Mode == "pixelate" ? RedactMode.Pixelate : RedactMode.Blur, BlockSize = Math.Max(0, r.BlockSize), BlurRadius = Math.Max(0, r.BlurRadius), FromSec = r.From, ToSec = r.To });
-            }
-            foreach (var x in e.Censors)
-                clip.Censors.Add(new AudioCensor { FromSec = x.From, ToSec = x.To, Mode = x.Mode == "mute" ? CensorMode.Mute : CensorMode.Beep });
-            result.Clips.Add(clip);
+            result.Clips.Add(ClipFromEntry(e, media));
         }
         foreach (var o in pf.Overlays) result.Overlays.Add(o.ToModel(Guid.NewGuid().ToString("N")));
         return result;

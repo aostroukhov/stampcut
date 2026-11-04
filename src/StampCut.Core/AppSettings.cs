@@ -42,6 +42,8 @@ public sealed class AppSettings
     /// <summary>Пользователь закрыл предупреждение про драйвер для этой версии драйвера.</summary>
     public string? DismissedDriverWarning { get; set; }
     public const int RecentLimit = 12;
+    /// <summary>История экспорта (последние 50).</summary>
+    public List<ExportRecord> ExportHistory { get; set; } = new();
 
     public static void Touch(List<string> list, string? value, int limit = RecentLimit)
     {
@@ -93,6 +95,16 @@ public sealed class AppSettings
 }
 
 public enum OutputLocation { NextToSource, LastUsed, Fixed }
+
+public sealed class ExportRecord
+{
+    public string Path { get; set; } = "";
+    public DateTime At { get; set; }
+    public double DurationSec { get; set; }
+    public long SizeBytes { get; set; }
+    public double ElapsedSec { get; set; }
+    public string? Project { get; set; }
+}
 
 public sealed class HardwareCache
 {

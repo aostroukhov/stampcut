@@ -189,6 +189,18 @@ public class CommandBuilderTests
     }
 
     [Fact]
+    public void MutedClip_LosesAudioTrack_AndSilenceIsUsedInJoin()
+    {
+        var a = Clip.FromMedia(Media("C:/v/a.mp4", dur: 5)); a.AudioGainDb = Clip.MuteDb;
+        var single = FFmpegCommandBuilder.Build(Job(Telegram(), a));
+        Assert.Contains("-an", single.Args);
+        var b = Clip.FromMedia(Media("C:/v/b.mp4", dur: 5));
+        var join = FFmpegCommandBuilder.Build(Job(Telegram(), a, b));
+        Assert.Contains("anullsrc", string.Join(" ", join.Args));
+        Assert.Contains("concat=n=2:v=1:a=1", join.FilterGraph);
+    }
+
+    [Fact]
     public void AutoQuality_CapsBitrateFromSource()
     {
         var clip = Clip.FromMedia(Media(bitrate: 8_000_000));
@@ -261,5 +273,38 @@ public class CommandBuilderTests
         var errors = FFmpegCommandBuilder.Validate(job);
         Assert.Contains(errors, e => e.Contains("ни одного ролика"));
         Assert.Contains(errors, e => e.Contains("Auto"));
+    }
+}
+
+public class ImageTests
+{
+    [Fact]
+    public void Photo_BecomesLoopedInput_WithSilence_AndFps30()
+    {
+        var photo = new MediaInfo { Path = "C:/p/a.jpg", HasVideo = true, Width = 4000, Height = 3000, IsImage = true, DurationSec = MediaInfo.ImageMaxDurationSec, VideoCodec = "mjpeg", PixelFormat = "yuvj420p", SizeBytes = 2_000_000, Container = "image2" };
+        var clip = Clip.FromMedia(photo);
+        Assert.Equal(5, clip.DurationSec, 6);
+        var video = Clip.FromMedia(TestData.Media("C:/v/b.mp4", 1920, 1080, 25, 10));
+        var r = FFmpegCommandBuilder.Build(TestData.Job(TestData.Telegram(), clip, video));
+        var cmd = string.Join(" ", r.Args);
+        Assert.Contains("-loop 1 -framerate 25 -t 5 -i C:/p/a.jpg", cmd);
+        Assert.Contains("anullsrc", cmd);
+        Assert.Equal(25, r.OutputFps);
+        Assert.Equal((1920, 1440), (r.OutputWidth, r.OutputHeight));
+        Assert.Contains("concat=n=2", r.FilterGraph);
+    }
+
+    [Fact]
+    public void Probe_DetectsJpegAsImage()
+    {
+        var json = """
+        { "streams": [ { "codec_type": "video", "codec_name": "mjpeg", "width": 4032, "height": 3024, "pix_fmt": "yuvj420p", "r_frame_rate": "25/1", "avg_frame_rate": "25/1" } ],
+          "format": { "format_name": "image2", "size": "3000000" } }
+        """;
+        var m = MediaProbe.Parse("C:/p/IMG_1.JPG", json);
+        Assert.True(m.IsImage);
+        Assert.True(m.NeedsProxy);
+        Assert.Equal(MediaInfo.ImageMaxDurationSec, m.DurationSec);
+        Assert.Contains("фото", m.Summary());
     }
 }

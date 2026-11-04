@@ -19,14 +19,17 @@ public sealed class Clip
     public CropRect? Crop { get; set; }
     public List<RedactRegion> Redactions { get; } = new();
     public List<AudioCensor> Censors { get; } = new();
-    /// <summary>Поправка уровня звука ролика, дБ (−20…+20): она же громкость просмотра, она же усиление при экспорте.</summary>
+    /// <summary>Поправка уровня звука ролика, дБ (MuteDb…+30): она же громкость просмотра, она же усиление при экспорте. MuteDb — звук убирается совсем.</summary>
     public double AudioGainDb { get; set; }
+    public const double MuteDb = -60;
+    public const double MaxGainDb = 30;
+    public bool IsMuted => AudioGainDb <= MuteDb + 0.5;
     public VideoFilters Filters { get; set; } = new();
 
     public static Clip FromMedia(MediaInfo media)
     {
         var c = new Clip { Media = media };
-        c.Segments.Add(new Segment { InSec = 0, OutSec = media.DurationSec });
+        c.Segments.Add(new Segment { InSec = 0, OutSec = media.IsImage ? MediaInfo.ImageDefaultDurationSec : media.DurationSec });
         return c;
     }
 

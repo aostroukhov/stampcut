@@ -92,7 +92,7 @@ public sealed partial class MainWindow
                 _preview.Refresh();
             }
         };
-        _opacitySlider = Ui.Slider(0, 100, 80, v => { if (_selectedOverlay is null || _syncing) return; _selectedOverlay.Opacity = v / 100.0; _opacityText.Text = $"{v:0} %"; _preview.Refresh(); }, width: 0);
+        _opacitySlider = Ui.Slider(0, 100, 80, v => { if (_selectedOverlay is null || _syncing) return; _selectedOverlay.Opacity = v / 100.0; _opacityText.Text = $"{v:0} %"; _preview.Refresh(); ScheduleCommit(); }, width: 0);
         _ovWhole = new RadioButton { Content = T("весь ролик"), IsChecked = true, Margin = new Thickness(0, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center, Focusable = false };
         _ovRange = new RadioButton { Content = T("с"), VerticalAlignment = VerticalAlignment.Center, Focusable = false };
         _ovFrom = Ui.NumberBox(0, v => { if (_selectedOverlay is null) return; _selectedOverlay.FromSec = v; _ovRange.IsChecked = true; _preview.Refresh(); }, 52, "0.#");
@@ -161,6 +161,7 @@ public sealed partial class MainWindow
         _preview.SelectedOverlay = s;
         SyncOverlayPanel();
         _preview.Refresh();
+        ScheduleCommit();
         if (item.ResolvedPath is null) BrowseOverlayFile();
     }
 
@@ -176,6 +177,7 @@ public sealed partial class MainWindow
         _preview.SelectedOverlay = s;
         SyncOverlayPanel();
         _preview.Refresh();
+        ScheduleCommit();
     }
 
     private void ApplyDefaultOverlayIfNeeded()
@@ -237,6 +239,7 @@ public sealed partial class MainWindow
         var o = _selectedOverlay;
         if (o is null) return;
         _overlaySizeText.Text = $"{T("Ширина")}: {o.Width:0.#}% {T("кадра")}";
+        ScheduleCommit();
     }
 
     private void SyncOverlayPanel()
@@ -318,6 +321,7 @@ public sealed partial class MainWindow
         _preview.SelectedOverlay = _selectedOverlay;
         SyncOverlayPanel();
         _preview.Refresh();
+        ScheduleCommit();
     }
 
     // ------------------------------------------------------------------ фильтры видео
@@ -341,9 +345,10 @@ public sealed partial class MainWindow
             _filterSliders[key] = (slider, value);
             col.Children.Add(Ui.FormRow(T(name), slider, value));
         }
-        col.Children.Add(Ui.Label(T("Результат виден на паузе; при воспроизведении показывается исходник. Двойной клик по ползунку — сброс."), muted: true, size: Ui.FontCaption));
+        var filtersHint = Ui.Label(ColorFilterEffect.Available ? T("Фильтры применяются при воспроизведении. Двойной клик по ползунку — сброс.") : T("Результат виден на паузе; при воспроизведении показывается исходник. Двойной клик по ползунку — сброс."), muted: true, size: Ui.FontCaption);
+        col.Children.Add(filtersHint);
         col.Children.Add(Ui.Row(
-            Ui.SmallButton(T("Сбросить"), () => { if (_current is null) return; _current.Filters = new VideoFilters(); SyncFiltersPanel(); RefreshFilteredFrameIfPaused(); }),
+            Ui.SmallButton(T("Сбросить"), () => { if (_current is null) return; _current.Filters = new VideoFilters(); SyncFiltersPanel(); _preview.SetFilters(_current.Filters); RefreshFilteredFrameIfPaused(); ScheduleCommit(); }),
             Ui.SmallButton(T("Ко всем роликам"), () => { if (_current is null) return; foreach (var c in _clips) if (!ReferenceEquals(c, _current)) c.Filters = _current.Filters.Clone(); _statusInfo.Text = T("Фильтры применены ко всем роликам"); })));
         return Ui.Card(col);
     }
@@ -361,7 +366,9 @@ public sealed partial class MainWindow
             case "contrast": f.Contrast = v; break;
         }
         _filterSliders[key].Value.Text = v.ToString();
+        _preview.SetFilters(f);
         RefreshFilteredFrameIfPaused();
+        ScheduleCommit();
     }
 
     private void SyncFiltersPanel()
@@ -412,6 +419,7 @@ public sealed partial class MainWindow
         UpdateOutputGeometry();
         RefreshClipList();
         UpdateExportInfo();
+        ScheduleCommit();
     }
 
     private void SyncCropPanel()
@@ -445,11 +453,11 @@ public sealed partial class MainWindow
             if (_selectedRedaction is null || _syncing) return;
             int px = (int)Math.Round(v);
             if (_selectedRedaction.Mode == RedactMode.Pixelate) _selectedRedaction.BlockSize = px; else _selectedRedaction.BlurRadius = px;
-            SyncEffectLabel(); _preview.Layout();
+            SyncEffectLabel(); _preview.Layout(); ScheduleCommit();
         }, width: 0);
         _redactModeCombo = new ComboBox { Width = 110, Height = Ui.ControlHeight };
         _redactModeCombo.Items.Add(T("Размытие")); _redactModeCombo.Items.Add(T("Мозаика"));
-        _redactModeCombo.SelectionChanged += (_, _) => { if (_selectedRedaction is null || _syncing) return; _selectedRedaction.Mode = _redactModeCombo.SelectedIndex == 1 ? RedactMode.Pixelate : RedactMode.Blur; SyncRedactPanel(); _preview.Refresh(); RefreshClipList(); };
+        _redactModeCombo.SelectionChanged += (_, _) => { if (_selectedRedaction is null || _syncing) return; _selectedRedaction.Mode = _redactModeCombo.SelectedIndex == 1 ? RedactMode.Pixelate : RedactMode.Blur; SyncRedactPanel(); _preview.Refresh(); RefreshClipList(); ScheduleCommit(); };
         _rdWhole = new RadioButton { Content = T("весь ролик"), IsChecked = true, Margin = new Thickness(0, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center, Focusable = false };
         _rdRange = new RadioButton { Content = T("с"), VerticalAlignment = VerticalAlignment.Center, Focusable = false };
         _rdFrom = Ui.NumberBox(0, v => { if (_selectedRedaction is null) return; _selectedRedaction.FromSec = v; _rdRange.IsChecked = true; UpdateTimelineMarkers(); }, 52, "0.#");
@@ -499,6 +507,7 @@ public sealed partial class MainWindow
         SyncRedactPanel();
         UpdateTimelineMarkers();
         RefreshClipList();
+        ScheduleCommit();
     }
 
     private void RemoveSelectedRedaction()
@@ -511,6 +520,7 @@ public sealed partial class MainWindow
         SyncRedactPanel();
         UpdateTimelineMarkers();
         RefreshClipList();
+        ScheduleCommit();
     }
 
     private void SyncRedactPanel()
@@ -598,13 +608,15 @@ public sealed partial class MainWindow
 
     private void UpdateTimelineMarkers()
     {
+        ScheduleCommit();
         _timeline.Markers.Clear();
         if (_current is not null)
         {
             foreach (var r in _current.Redactions.Where(r => r.FromSec is not null || r.ToSec is not null))
-                _timeline.Markers.Add(new TimelineMarker(r.FromSec ?? 0, r.ToSec ?? _current.Media.DurationSec, RedactBrush, 0));
+                _timeline.Markers.Add(new TimelineMarker { Tag = r, From = r.FromSec ?? 0, To = r.ToSec ?? _current.Media.DurationSec, Brush = RedactBrush, Lane = 0 });
             foreach (var c in _current.Censors)
-                _timeline.Markers.Add(new TimelineMarker(c.FromSec, c.ToSec, CensorBrush, 1));
+                _timeline.Markers.Add(new TimelineMarker { Tag = c, From = c.FromSec, To = c.ToSec, Brush = CensorBrush, Lane = 1 });
+            _timeline.SelectedMarkerTag = (object?)SelectedCensor ?? _selectedRedaction;
         }
         _timeline.InvalidateVisual();
     }

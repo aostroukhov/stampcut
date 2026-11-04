@@ -33,6 +33,10 @@ public sealed class PreviewControl : Grid
         LoadedBehavior = MediaState.Manual, UnloadedBehavior = MediaState.Manual, ScrubbingEnabled = true, Stretch = Stretch.Uniform,
     };
     private readonly Image _poster = new() { Stretch = Stretch.Uniform, IsHitTestVisible = false };
+    private readonly Grid _media = new();
+    private ColorFilterEffect? _effect;
+    /// <summary>Фильтры применяются на видеокарте прямо при воспроизведении (если шейдер скомпилировался).</summary>
+    public bool LiveFilters => _effect is not null;
     private readonly Canvas _layer = new() { HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, ClipToBounds = false };
     private readonly TextBlock _message = new()
     {
@@ -61,6 +65,8 @@ public sealed class PreviewControl : Grid
     public event Action? CropChanged;
     public event Action<RedactRegion>? RedactionChanged;
     public event Action<RedactRegion?>? RedactionSelected;
+    /// <summary>Любое перетаскивание на превью закончено (для истории изменений).</summary>
+    public event Action? EditCompleted;
 
     private double _scale = 1;
     private readonly List<Action> _layouters = new();
@@ -69,8 +75,10 @@ public sealed class PreviewControl : Grid
     {
         Background = Ui.PreviewBg;
         ClipToBounds = true;
-        Children.Add(Player);
-        Children.Add(_poster);
+        _media.Children.Add(Player);
+        _media.Children.Add(_poster);
+        Children.Add(_media);
+        if (ColorFilterEffect.Available) { try { _effect = new ColorFilterEffect(); _media.Effect = _effect; } catch { _effect = null; } }
         Children.Add(_layer);
         Children.Add(_message);
         SizeChanged += (_, _) => Layout();
@@ -84,6 +92,15 @@ public sealed class PreviewControl : Grid
     }
 
     public void SetVideoSize(int w, int h) { VideoWidth = Math.Max(1, w); VideoHeight = Math.Max(1, h); Layout(); }
+
+    /// <summary>Применить фильтры ролика к живому изображению (ничего не делает без шейдера).</summary>
+    public void SetFilters(VideoFilters f)
+    {
+        if (_effect is null) return;
+        if (f.IsDefault) { if (_media.Effect is not null) _media.Effect = null; return; }
+        _effect.Apply(f);
+        if (_media.Effect is null) _media.Effect = _effect;
+    }
     public void SetMode(EditMode mode) { Mode = mode; Refresh(); }
     public void ShowPoster(BitmapSource? image) { _poster.Source = image; _poster.Visibility = image is null ? Visibility.Collapsed : Visibility.Visible; }
     public void HidePoster() => _poster.Visibility = Visibility.Collapsed;
@@ -241,6 +258,7 @@ public sealed class PreviewControl : Grid
                 var r = RectOut(); double k = K();
                 Apply(r.X + e.HorizontalChange / _scale / k, r.Y + e.VerticalChange / _scale / k, r.Width);
             };
+            move.DragCompleted += (_, _) => EditCompleted?.Invoke();
             foreach (var (t, dx, dy) in handles)
             {
                 int ddx = dx, ddy = dy;
@@ -259,6 +277,7 @@ public sealed class PreviewControl : Grid
                     double y = ddy < 0 ? r.Bottom - h : ddy == 0 ? r.Y + (r.Height - h) / 2 : r.Y;
                     Apply(x, y, w);
                 };
+                t.DragCompleted += (_, _) => EditCompleted?.Invoke();
             }
         }
     }
@@ -309,6 +328,8 @@ public sealed class PreviewControl : Grid
             _layouters.Add(LayoutItem);
 
             move.DragStarted += (_, _) => { SelectedRedaction = region; RedactionSelected?.Invoke(region); Layout(); };
+            move.DragCompleted += (_, _) => EditCompleted?.Invoke();
+            resize.DragCompleted += (_, _) => EditCompleted?.Invoke();
             move.DragDelta += (_, e) =>
             {
                 region.X = Math.Max(0, Math.Min(1 - region.W, region.X + e.HorizontalChange / _scale / VideoWidth));
@@ -358,6 +379,8 @@ public sealed class PreviewControl : Grid
         _layouters.Add(LayoutItem);
 
         move.DragDelta += (_, e) => { var r = Px(); r.X += e.HorizontalChange / _scale; r.Y += e.VerticalChange / _scale; Set(r); };
+        move.DragCompleted += (_, _) => EditCompleted?.Invoke();
+        foreach (var h in new[] { tl, tr, bl, br }) h.DragCompleted += (_, _) => EditCompleted?.Invoke();
         void Corner(Thumb t, bool left, bool top)
         {
             t.DragDelta += (_, e) =>

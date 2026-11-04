@@ -30,9 +30,15 @@ public sealed class MediaInfo
     public int Channels { get; init; }
 
     public string Container { get; init; } = "";
+    /// <summary>Фото: один кадр, длительность условная (ролик из фото живёт столько, сколько задан фрагмент).</summary>
+    public bool IsImage { get; init; }
+    /// <summary>Условная максимальная длительность фото-ролика на ленте.</summary>
+    public const double ImageMaxDurationSec = 60;
+    public const double ImageDefaultDurationSec = 5;
 
     /// <summary>Нужен ли прокси для просмотра средствами Windows (WPF MediaElement уверенно играет только H.264 8 бит в MP4 без поворота).</summary>
     public bool NeedsProxy =>
+        IsImage ||
         !HasVideo ||
         VideoCodec != "h264" ||
         PixelFormat != "yuv420p" ||
@@ -43,6 +49,13 @@ public sealed class MediaInfo
     public string Summary()
     {
         var parts = new List<string>();
+        if (IsImage)
+        {
+            parts.Add(Loc.T("фото"));
+            parts.Add($"{Width}×{Height}");
+            parts.Add(TimeFormat.FormatSize(SizeBytes));
+            return string.Join(" · ", parts);
+        }
         if (HasVideo)
         {
             var codec = VideoCodec.ToUpperInvariant();

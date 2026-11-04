@@ -35,8 +35,6 @@ public sealed partial class MainWindow : Window
     private readonly TextBlock _fragmentText = Ui.Label("", muted: true);
     private readonly TextBlock _statusInfo = Ui.Label("", muted: true);
     private readonly TextBlock _statusHw = Ui.Label("", muted: true);
-    private readonly ProgressBar _progress = new() { Width = 220, Height = 14, Visibility = Visibility.Collapsed, VerticalAlignment = VerticalAlignment.Center };
-    private readonly TextBlock _progressText = Ui.Label("", muted: true);
     private readonly Button _cancelButton;
     private readonly Button _playButton;
     private Slider _volume = new();
@@ -56,6 +54,7 @@ public sealed partial class MainWindow : Window
     {
         _s = new AppServices(settings);
         _proxy = new ProxyService(_s);
+        _waveform = new WaveformService(_s);
         _exportPresets = _s.Presets.LoadExportPresets();
         _preset = _exportPresets.FirstOrDefault(p => p.Id == _s.Settings.LastExportPresetId) ?? _exportPresets[0];
         _overlayPresets = _s.Presets.LoadOverlayPresets();
@@ -82,6 +81,7 @@ public sealed partial class MainWindow : Window
 
         Content = BuildLayout();
         WireEvents();
+        InitHistory();
         UpdateEnabledState();
         _timeline.SnapToKeyframes = _preset.StreamCopy;
         _statusInfo.Text = T("Перетащите видео в окно или нажмите «Открыть»");
@@ -99,10 +99,15 @@ public sealed partial class MainWindow : Window
         Loaded += async (_, _) =>
         {
             if (filesToOpen.Count > 0) await OpenAnyAsync(filesToOpen, replace: true);
+            else await OfferAutosaveRestoreAsync(null);
         };
-        Closing += (_, _) =>
+        Closing += (_, e) =>
         {
+            if (_exportCts is not null && MessageBox.Show(this, T("Идёт экспорт. Прервать и выйти?"), "StampCut", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) { e.Cancel = true; return; }
+            if (!ConfirmDiscardChanges()) { e.Cancel = true; return; }
+            if (!_history.IsDirty) DeleteAutosave(_projectPath);
             _timer.Stop();
+            _autosaveTimer.Stop();
             _exportCts?.Cancel();
             _proxyCts?.Cancel();
             _s.Settings.WindowMaximized = WindowState == WindowState.Maximized;
@@ -147,10 +152,9 @@ public sealed partial class MainWindow : Window
         status.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         status.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         status.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var progressRow = Ui.Row(_progress, _progressText, _cancelButton);
-        Grid.SetColumn(_statusInfo, 0); Grid.SetColumn(progressRow, 1); Grid.SetColumn(_statusHw, 2);
+        Grid.SetColumn(_statusInfo, 0); Grid.SetColumn(_statusHw, 2);
         _statusHw.Margin = new Thickness(16, 0, 0, 0);
-        status.Children.Add(_statusInfo); status.Children.Add(progressRow); status.Children.Add(_statusHw);
+        status.Children.Add(_statusInfo); status.Children.Add(_statusHw);
         DockPanel.SetDock(status, Dock.Bottom);
         dock.Children.Add(status);
 
@@ -219,14 +223,15 @@ public sealed partial class MainWindow : Window
         _timeText.Margin = new Thickness(8, 0, 0, 0);
         line1.Children.Add(play);
 
-        _volume = Ui.Slider(-20, 20, 0, v => { if (_syncing) return; SetGain(Math.Round(v)); }, width: 120);
+        _volume = Ui.Slider(Core.Models.Clip.MuteDb, Core.Models.Clip.MaxGainDb, 0, v => { if (_syncing) return; SetGain(Math.Round(v)); }, width: 150);
         _volume.TickFrequency = 1; _volume.IsSnapToTickEnabled = true;
         _volume.ToolTip = T("Громкость ролика (↑ ↓): так он играет здесь и с таким уровнем уйдёт в экспорт");
         var vol = Ui.Label("🔊");
         vol.Margin = new Thickness(10, 0, 2, 0);
-        _gainText.Width = 48;
+        _gainText.Width = 72;
         var line2 = Ui.Row(
-            Ui.Toggle(T("По склейке"), true, v => _followEdit = v, T("Проигрывать только фрагменты и переходить к следующему ролику — как в результате")),
+            Ui.Toggle(T("По склейке"), true, v => _followEdit = v, T("Проигрывать только фрагменты ролика по кругу")),
+            Ui.Toggle(T("Все ролики"), false, v => _playAllClips = v, T("После последнего фрагмента переходить к следующему ролику — как в результате")),
             vol, _volume, _gainText, _fragmentText);
         line2.Margin = new Thickness(0, 0, 0, 2);
         return Ui.Column(line1, line2);
@@ -243,11 +248,31 @@ public sealed partial class MainWindow : Window
         _preview.CropChanged += () => { SyncCropPanel(); UpdateOutputGeometry(rebuild: false); };
         _preview.RedactionChanged += _ => SyncRedactPanel();
         _preview.RedactionSelected += r => { _selectedRedaction = r; SyncRedactPanel(); };
+        _preview.EditCompleted += () => { if (_preview.Mode == EditMode.Crop) AfterCropChanged(); else ScheduleCommit(); };
         _timeline.SeekRequested += Seek;
         _timeline.SegmentEdgeChanged += (seg, isIn, v) => { if (isIn) seg.InSec = v; else seg.OutSec = v; _activeSegment = seg; AfterTrimChanged(light: true); };
         _timeline.ActiveSegmentChanged += seg => { _activeSegment = seg; AfterTrimChanged(light: true); };
-        _timeline.DragCompleted += () => AfterTrimChanged();
+        _timeline.DragCompleted += () => { AfterTrimChanged(); SyncRedactPanel(); SyncCensorPanel(); };
         _timeline.ContextRequested += ShowTimelineMenu;
+        _timeline.MarkerEdgeChanged += (m, isFrom, t) =>
+        {
+            t = Math.Round(t, 2);
+            switch (m.Tag)
+            {
+                case AudioCensor c: if (isFrom) c.FromSec = t; else c.ToSec = t; m.From = c.FromSec; m.To = c.ToSec; break;
+                case RedactRegion r: if (isFrom) r.FromSec = t; else r.ToSec = t; m.From = r.FromSec ?? 0; m.To = r.ToSec ?? (_current?.Media.DurationSec ?? 0); break;
+            }
+            _timeline.InvalidateVisual();
+            _preview.Layout();
+        };
+        _timeline.MarkerSelected += m =>
+        {
+            switch (m?.Tag)
+            {
+                case AudioCensor c: SyncCensorPanel(c); break;
+                case RedactRegion r: _selectedRedaction = r; _preview.SelectedRedaction = r; SyncRedactPanel(); _preview.Refresh(); break;
+            }
+        };
 
         DragEventHandler dragCheck = (_, e) => { e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None; e.Handled = true; };
         DragEnter += dragCheck;
@@ -279,14 +304,23 @@ public sealed partial class MainWindow : Window
             case Key.O when !ctrl: SetOutHere(); break;
             case Key.O when ctrl: OpenFiles(replace: true); break;
             case Key.S when ctrl: SaveProject(saveAs: shift); break;
+            case Key.Z when ctrl && !shift: Undo(); break;
+            case Key.Z when ctrl && shift: Redo(); break;
+            case Key.Y when ctrl: Redo(); break;
+            case Key.V when ctrl: Fire(PasteAsync()); break;
             case Key.E when ctrl: Fire(ExportAsync()); break;
             case Key.Left: Seek(Position - step); break;
             case Key.Right: Seek(Position + step); break;
-            case Key.OemComma: StepFrame(-1); break;
-            case Key.OemPeriod: StepFrame(1); break;
+            case Key.OemComma: StepFrame(shift ? -10 : -1); break;
+            case Key.OemPeriod: StepFrame(shift ? 10 : 1); break;
+            case Key.OemOpenBrackets: if (_timeline.PrevKeyframe(Position) is { } pk) { Pause(); Seek(pk); } break;
+            case Key.OemCloseBrackets: if (_timeline.NextKeyframe(Position) is { } nk) { Pause(); Seek(nk); } break;
+            case Key.D0 when ctrl: _timeline.ResetView(); break;
+            case Key.OemPlus when ctrl: _timeline.Zoom(1.5, Position); break;
+            case Key.OemMinus when ctrl: _timeline.Zoom(1 / 1.5, Position); break;
             case Key.Up: SetGain((_current?.AudioGainDb ?? 0) + 1); break;
             case Key.Down: SetGain((_current?.AudioGainDb ?? 0) - 1); break;
-            case Key.M: _preview.Player.IsMuted = !_preview.Player.IsMuted; break;
+            case Key.M: ToggleMute(); break;
             case Key.Home: Seek(ActiveSegment?.InSec ?? 0); break;
             case Key.End: Seek(ActiveSegment?.OutSec ?? 0); break;
             case Key.Escape: if (_exportCts is not null) CancelExport(); else SetEditMode(EditMode.View); break;
@@ -302,17 +336,29 @@ public sealed partial class MainWindow : Window
     private void SetGain(double db)
     {
         if (_current is null) return;
-        db = Math.Clamp(Math.Round(db), -20, 20);
+        db = Math.Clamp(Math.Round(db), Core.Models.Clip.MuteDb, Core.Models.Clip.MaxGainDb);
         _current.AudioGainDb = db;
         ApplyGainToPlayer();
         _syncing = true; _volume.Value = db; _syncing = false;
-        _gainText.Text = $"{(db > 0 ? "+" : "")}{db:0} {T("дБ")}";
+        _gainText.Text = _current.IsMuted ? T("без звука") : $"{(db > 0 ? "+" : "")}{db:0} {T("дБ")}";
+        _timeline.Muted = _current.IsMuted; _timeline.InvalidateVisual();
+        ScheduleCommit();
+    }
+
+    private double _gainBeforeMute;
+
+    /// <summary>M: заглушить ролик (и в экспорте) / вернуть прежнюю громкость.</summary>
+    private void ToggleMute()
+    {
+        if (_current is null) return;
+        if (_current.IsMuted) SetGain(_gainBeforeMute);
+        else { _gainBeforeMute = _current.AudioGainDb; SetGain(Core.Models.Clip.MuteDb); }
     }
 
     private void ApplyGainToPlayer()
     {
         double db = _current?.AudioGainDb ?? 0;
-        _preview.Player.Volume = Math.Clamp(0.5 * Math.Pow(10, db / 20.0), 0, 1);
+        _preview.Player.Volume = _current?.IsMuted == true ? 0 : Math.Clamp(0.5 * Math.Pow(10, db / 20.0), 0, 1);
     }
 
     // ------------------------------------------------------------------ контекстное меню ленты
@@ -352,6 +398,9 @@ public sealed partial class MainWindow : Window
     {
         var menu = new ContextMenu { PlacementTarget = anchor, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
         void Item(string text, Action action, bool enabled = true) { var mi = new MenuItem { Header = text, IsEnabled = enabled }; mi.Click += (_, _) => action(); menu.Items.Add(mi); }
+        Item(T("Отменить") + " (Ctrl+Z)", Undo, _history.CanUndo);
+        Item(T("Повторить") + " (Ctrl+Y)", Redo, _history.CanRedo);
+        menu.Items.Add(new Separator());
         Item(T("Сохранить проект") + " (Ctrl+S)", () => SaveProject(saveAs: false), _clips.Count > 0);
         Item(T("Сохранить проект как…"), () => SaveProject(saveAs: true), _clips.Count > 0);
         Item(T("Открыть проект…"), OpenProjectDialog);
@@ -359,9 +408,10 @@ public sealed partial class MainWindow : Window
         menu.IsOpen = true;
     }
 
-    private void SaveProject(bool saveAs)
+    private bool SaveProject(bool saveAs)
     {
-        if (_clips.Count == 0) return;
+        if (_clips.Count == 0) return false;
+        CommitNow();
         var path = _projectPath;
         if (saveAs || path is null)
         {
@@ -372,22 +422,27 @@ public sealed partial class MainWindow : Window
                 FileName = Path.GetFileNameWithoutExtension(first) + Core.Presets.ProjectFile.Extension,
                 InitialDirectory = Path.GetDirectoryName(first),
             };
-            if (dlg.ShowDialog(this) != true) return;
+            if (dlg.ShowDialog(this) != true) return false;
             path = dlg.FileName;
             if (!Core.Presets.ProjectStore.IsProjectFile(path)) path += Core.Presets.ProjectFile.Extension;
         }
         try
         {
             Core.Presets.ProjectStore.Save(path, _clips, _overlays.Select(o => o.Settings), _preset.Id);
+            DeleteAutosave(_projectPath);
             _projectPath = path;
+            _history.MarkSaved();
+            DeleteAutosave(path);
             AppSettings.Touch(_s.Settings.RecentFiles, path);
             _statusInfo.Text = $"{T("Проект сохранён")}: {Path.GetFileName(path)}";
-            SetTitle(Path.GetFileName(path));
+            UpdateDirtyTitle();
+            return true;
         }
         catch (Exception ex)
         {
             Logger.Error("Сохранение проекта", ex);
             ShowInfo(T("Не удалось сохранить проект: ") + ex.Message, InfoKind.Error);
+            return false;
         }
     }
 
@@ -399,10 +454,23 @@ public sealed partial class MainWindow : Window
         if (dlg.ShowDialog(this) == true) Fire(OpenProjectAsync(dlg.FileName));
     }
 
-    private async Task OpenProjectAsync(string path)
+    /// <summary>asAutosaveOf — путь исходного проекта ("" для безымянного), если открываем его резервную копию: проект считается несохранённым.</summary>
+    private async Task OpenProjectAsync(string path, string? asAutosaveOf = null)
     {
+        if (asAutosaveOf is null && !ConfirmDiscardChanges()) return;
+        if (asAutosaveOf is null && FindAutosave(path) is not null)
+        {
+            var when = File.GetLastWriteTime(AutosavePath(path));
+            if (MessageBox.Show(this, $"{T("Найдена резервная копия проекта от")} {when:g}. {T("Восстановить её?")}", "StampCut", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+            {
+                await OpenProjectAsync(AutosavePath(path), asAutosaveOf: path);
+                return;
+            }
+            DeleteAutosave(path);
+        }
         _statusInfo.Text = T("Открываю проект…");
         var result = await Core.Presets.ProjectStore.LoadAsync(path, _s.Probe);
+        foreach (var c in result.Clips) _mediaCache[c.Media.Path] = c.Media;
         Pause();
         _clips.Clear(); _current = null; _activeSegment = null;
         _clips.AddRange(result.Clips);
@@ -417,10 +485,10 @@ public sealed partial class MainWindow : Window
         _preview.Overlays.Clear(); _preview.Overlays.AddRange(_overlays);
         _preview.SelectedOverlay = _selectedOverlay;
         if (_exportPresets.FirstOrDefault(p => p.Id == result.ExportPresetId) is { } preset) { _preset = preset; RefreshPresetCombos(); }
-        _projectPath = path;
-        AppSettings.Touch(_s.Settings.RecentFiles, path);
-        AppSettings.Touch(_s.Settings.RecentOpenDirs, Path.GetDirectoryName(path));
-        SetTitle(Path.GetFileName(path));
+        _projectPath = asAutosaveOf is null ? path : (asAutosaveOf.Length == 0 ? null : asAutosaveOf);
+        if (_projectPath is not null) { AppSettings.Touch(_s.Settings.RecentFiles, _projectPath); AppSettings.Touch(_s.Settings.RecentOpenDirs, Path.GetDirectoryName(_projectPath)); }
+        _history.Reset(Snapshot(), saved: asAutosaveOf is null);
+        UpdateDirtyTitle();
         RefreshClipList();
         SyncOverlayPanel();
         UpdateExportInfo();
@@ -435,14 +503,49 @@ public sealed partial class MainWindow : Window
         var list = files.ToList();
         var project = list.FirstOrDefault(Core.Presets.ProjectStore.IsProjectFile);
         if (project is not null) { await OpenProjectAsync(project); list.Remove(project); replace = false; }
-        var videos = list.Where(f => IsVideoFile(f) || !Path.HasExtension(f) || File.Exists(f)).Where(f => !Core.Presets.ProjectStore.IsProjectFile(f)).ToList();
+        var videos = list.Where(f => IsVideoFile(f) || IsImageFile(f) || File.Exists(f)).Where(f => !Core.Presets.ProjectStore.IsProjectFile(f)).ToList();
         if (videos.Count > 0) await AddFilesAsync(videos, replace);
     }
 
-    private void SetTitle(string? project)
+    private void SetTitle(string? project, bool dirty = false)
     {
-        Title = project is null ? $"StampCut {AppVersion}" : $"{project} — StampCut {AppVersion}";
-        _titleText.Text = project is null ? "StampCut" : project;
+        var mark = dirty ? "• " : "";
+        Title = project is null ? $"{mark}StampCut {AppVersion}" : $"{mark}{project} — StampCut {AppVersion}";
+        _titleText.Text = mark + (project is null ? "StampCut" : project);
+    }
+
+    // ------------------------------------------------------------------ вставка из буфера
+
+    /// <summary>Ctrl+V: файлы из проводника — как ролики (или проект), картинка — сохраняется в PNG и добавляется как фото.</summary>
+    private async Task PasteAsync()
+    {
+        try
+        {
+            if (Clipboard.ContainsFileDropList())
+            {
+                var files = Clipboard.GetFileDropList().Cast<string>().Where(File.Exists).ToList();
+                if (files.Count > 0) { await OpenAnyAsync(files, replace: _clips.Count == 0); return; }
+            }
+            if (Clipboard.ContainsImage())
+            {
+                var img = Clipboard.GetImage();
+                if (img is null) return;
+                var dir = AppPaths.Ensure(Path.Combine(AppPaths.Local, "pasted"));
+                var path = Path.Combine(dir, $"paste-{DateTime.Now:yyyyMMdd-HHmmss}.png");
+                var enc = new PngBitmapEncoder();
+                enc.Frames.Add(BitmapFrame.Create(img));
+                using (var fs = File.Create(path)) enc.Save(fs);
+                await AddFilesAsync(new[] { path }, replace: _clips.Count == 0);
+                return;
+            }
+            if (Clipboard.ContainsText())
+            {
+                var text = Clipboard.GetText().Trim().Trim('"');
+                if (File.Exists(text)) { await OpenAnyAsync(new[] { text }, replace: _clips.Count == 0); return; }
+            }
+            _statusInfo.Text = T("В буфере обмена нет файлов или изображения");
+        }
+        catch (Exception ex) { Logger.Error("Вставка", ex); ShowInfo(T("Ошибка: ") + ex.Message, InfoKind.Error); }
     }
 
     /// <summary>Пока нет ни одного ролика, инструменты и управление воспроизведением неактивны.</summary>

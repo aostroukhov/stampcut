@@ -7,9 +7,21 @@ using StampCut.Core.Models;
 
 namespace StampCut.App.Controls;
 
-public sealed record TimelineMarker(double From, double To, Brush Brush, int Lane);
+/// <summary>Редактируемый интервал на ленте (ретушь, запикивание): перетаскиваются обе границы.</summary>
+public sealed class TimelineMarker
+{
+    public required object Tag { get; init; }
+    public double From { get; set; }
+    public double To { get; set; }
+    public required Brush Brush { get; init; }
+    public int Lane { get; init; }
+    public string Label { get; init; } = "";
+}
 
-/// <summary>Лента времени: позиция, фрагменты (вход/выход каждого), интервалы ретуши и запикивания, ключевые кадры.</summary>
+/// <summary>
+/// Лента времени: масштаб (Ctrl+колесо), прокрутка (колесо), фрагменты с перетаскиваемыми границами,
+/// волна звука, интервалы ретуши и запикивания с перетаскиваемыми границами, ключевые кадры, контекстное меню.
+/// </summary>
 public sealed class TimelineControl : FrameworkElement
 {
     public double Duration { get; set; }
@@ -17,87 +29,201 @@ public sealed class TimelineControl : FrameworkElement
     public List<Segment> Segments { get; set; } = new();
     public Segment? ActiveSegment { get; set; }
     public List<TimelineMarker> Markers { get; } = new();
+    public object? SelectedMarkerTag { get; set; }
     public IReadOnlyList<double> Keyframes { get; set; } = Array.Empty<double>();
     public bool SnapToKeyframes { get; set; }
+    public bool ShowKeyframes { get; set; } = true;
+    /// <summary>Огибающая звука 0..1, WaveformRate значений в секунду; null — нет звука или ещё считается.</summary>
+    public float[]? Waveform { get; set; }
+    public double WaveformRate { get; set; } = 100;
+    public bool Muted { get; set; }
+
+    // окно просмотра
+    public double ViewStart { get; private set; }
+    public double ViewDuration { get; private set; }
+    public bool IsZoomed => Duration > 0 && ViewDuration < Duration - 1e-6;
 
     public event Action<double>? SeekRequested;
-    /// <summary>Изменена граница фрагмента: (фрагмент, это вход?, новое значение).</summary>
     public event Action<Segment, bool, double>? SegmentEdgeChanged;
     public event Action<Segment?>? ActiveSegmentChanged;
+    public event Action<TimelineMarker, bool, double>? MarkerEdgeChanged;
+    public event Action<TimelineMarker?>? MarkerSelected;
     public event Action? DragCompleted;
-    /// <summary>Правая кнопка: время под курсором.</summary>
     public event Action<double>? ContextRequested;
-    public bool ShowKeyframes { get; set; } = true;
 
-    private enum Drag { None, Seek, Edge }
+    private enum Drag { None, Seek, SegmentEdge, MarkerEdge, Pan }
     private Drag _drag;
-    public bool IsDragging => _drag != Drag.None;
     private Segment? _dragSegment;
+    private TimelineMarker? _dragMarker;
     private bool _dragIsIn;
+    private double _panStartX, _panStartView;
+    public bool IsDragging => _drag != Drag.None;
+
     private const double Pad = 10;
-    private const double TrackTop = 14, TrackH = 20;
+    private const double RulerH = 14, TrackTop = 16, TrackH = 20, WaveTop = 40, WaveH = 26, LaneTop = 70, LaneH = 5;
 
     public TimelineControl()
     {
-        Height = 66;
+        Height = 96;
         Focusable = false;
         Cursor = Cursors.Hand;
+        ClipToBounds = true;
     }
 
+    public void ResetView() { ViewStart = 0; ViewDuration = Duration; InvalidateVisual(); }
+    public void SetDuration(double d) { Duration = d; ResetView(); }
+
     private double W => Math.Max(1, ActualWidth - 2 * Pad);
-    private double X(double t) => Pad + (Duration > 0 ? t / Duration : 0) * W;
-    private double T(double x) => Duration > 0 ? Math.Clamp((x - Pad) / W, 0, 1) * Duration : 0;
+    private double View => ViewDuration > 0 ? ViewDuration : Duration;
+    private double X(double t) => Pad + (View > 0 ? (t - ViewStart) / View : 0) * W;
+    private double T(double x) => View > 0 ? Math.Clamp(ViewStart + (x - Pad) / W * View, 0, Duration) : 0;
+
+    /// <summary>Масштаб вокруг точки времени: factor &gt; 1 — приблизить.</summary>
+    public void Zoom(double factor, double anchorTime)
+    {
+        if (Duration <= 0) return;
+        double newView = Math.Clamp(View / factor, Math.Min(Duration, 0.5), Duration);
+        double frac = View > 0 ? (anchorTime - ViewStart) / View : 0.5;
+        ViewStart = Math.Clamp(anchorTime - frac * newView, 0, Math.Max(0, Duration - newView));
+        ViewDuration = newView;
+        InvalidateVisual();
+    }
+
+    public void Pan(double deltaSec)
+    {
+        if (!IsZoomed) return;
+        ViewStart = Math.Clamp(ViewStart + deltaSec, 0, Math.Max(0, Duration - View));
+        InvalidateVisual();
+    }
+
+    /// <summary>Держать позицию в окне (при воспроизведении в увеличенном масштабе).</summary>
+    public void EnsureVisible(double t)
+    {
+        if (!IsZoomed) return;
+        if (t < ViewStart || t > ViewStart + View) { ViewStart = Math.Clamp(t - View * 0.1, 0, Math.Max(0, Duration - View)); InvalidateVisual(); }
+    }
 
     protected override void OnRender(DrawingContext dc)
     {
         base.OnRender(dc);
         double h = ActualHeight;
-        // кисти темы нельзя клонировать/замораживать — берём только цвета
-        var track = Ui.Solid(Ui.ThemeColor("ControlStrongFillColorDisabledBrush", Color.FromRgb(0xE1, 0xE4, 0xE8)));
+        var trackColor = Ui.ThemeColor("ControlStrongFillColorDisabledBrush", Color.FromRgb(0xE1, 0xE4, 0xE8));
         var accentColor = Ui.ThemeColor("AccentFillColorDefaultBrush", Color.FromRgb(0x00, 0x67, 0xC0));
-        var accent = Ui.Solid(accentColor);
-        var textBrush = Ui.Solid(Ui.ThemeColor("TextFillColorSecondaryBrush", Color.FromRgb(0x6B, 0x72, 0x80)));
+        var textColor = Ui.ThemeColor("TextFillColorSecondaryBrush", Color.FromRgb(0x6B, 0x72, 0x80));
+        var track = Ui.Solid(trackColor); var accent = Ui.Solid(accentColor); var textBrush = Ui.Solid(textColor);
+        var wave = Ui.Solid(accentColor, Muted ? 0.25 : 0.7);
         var playhead = Ui.Danger;
 
         dc.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, ActualWidth, h));
-        dc.DrawRoundedRectangle(track, null, new Rect(Pad, TrackTop, W, TrackH), 4, 4);
-        if (Duration <= 0) return;
+        if (Duration <= 0) { dc.DrawRoundedRectangle(track, null, new Rect(Pad, TrackTop, W, TrackH), 4, 4); return; }
+        if (ViewDuration <= 0) ViewDuration = Duration;
 
+        // линейка
+        var tf = new Typeface("Segoe UI");
+        double step = NiceStep(View / Math.Max(2, W / 90));
+        for (double t = Math.Ceiling(ViewStart / step) * step; t <= ViewStart + View + 1e-9; t += step)
+        {
+            double x = X(t);
+            dc.DrawLine(new Pen(textBrush, 1) { Brush = Ui.Solid(textColor, 0.5) }, new Point(x, RulerH - 4), new Point(x, RulerH));
+            var ft = new FormattedText(TimeFormat.Format(t, step < 1), CultureInfo.CurrentCulture, FlowDirection.LeftToRight, tf, 10, textBrush, 1.0);
+            dc.DrawText(ft, new Point(x + 2, 0));
+        }
+
+        // дорожка и фрагменты
+        dc.DrawRoundedRectangle(track, null, new Rect(Pad, TrackTop, W, TrackH), 4, 4);
         foreach (var s in Segments)
         {
             bool active = ReferenceEquals(s, ActiveSegment);
-            var fill = Ui.Solid(accentColor, active ? 0.55 : 0.28);
-            dc.DrawRectangle(fill, null, new Rect(X(s.InSec), TrackTop, Math.Max(1, X(s.OutSec) - X(s.InSec)), TrackH));
+            double x1 = Math.Max(Pad, X(s.InSec)), x2 = Math.Min(Pad + W, X(s.OutSec));
+            if (x2 <= x1) continue;
+            dc.DrawRectangle(Ui.Solid(accentColor, active ? 0.55 : 0.28), null, new Rect(x1, TrackTop, x2 - x1, TrackH));
         }
 
+        // волна звука
+        dc.DrawRectangle(Ui.Solid(trackColor, 0.5), null, new Rect(Pad, WaveTop, W, WaveH));
+        if (Waveform is { Length: > 0 } wf)
+        {
+            double mid = WaveTop + WaveH / 2, half = WaveH / 2 - 1;
+            int cols = (int)W;
+            var geo = new StreamGeometry();
+            using (var g = geo.Open())
+            {
+                for (int px = 0; px < cols; px++)
+                {
+                    double t0 = ViewStart + (double)px / W * View, t1 = ViewStart + (double)(px + 1) / W * View;
+                    int i0 = (int)(t0 * WaveformRate), i1 = Math.Max(i0 + 1, (int)(t1 * WaveformRate));
+                    float peak = 0;
+                    for (int i = i0; i < i1 && i < wf.Length; i++) if (wf[i] > peak) peak = wf[i];
+                    double a = Math.Max(0.5, peak * half);
+                    g.BeginFigure(new Point(Pad + px, mid - a), true, true);
+                    g.LineTo(new Point(Pad + px + 1, mid - a), false, false);
+                    g.LineTo(new Point(Pad + px + 1, mid + a), false, false);
+                    g.LineTo(new Point(Pad + px, mid + a), false, false);
+                }
+            }
+            geo.Freeze();
+            dc.DrawGeometry(wave, null, geo);
+            if (Muted)
+            {
+                var ft = new FormattedText("🔇", CultureInfo.CurrentCulture, FlowDirection.LeftToRight, tf, 12, textBrush, 1.0);
+                dc.DrawText(ft, new Point(Pad + 4, WaveTop + 5));
+            }
+        }
+
+        // ключевые кадры
         if (ShowKeyframes || SnapToKeyframes)
         {
-            var kf = new Pen(new SolidColorBrush(Color.FromArgb(90, 128, 128, 128)), 1);
-            foreach (var k in Keyframes) dc.DrawLine(kf, new Point(X(k), TrackTop), new Point(X(k), TrackTop + TrackH));
+            var kf = new Pen(Ui.Solid(textColor, 0.35), 1);
+            foreach (var k in Keyframes)
+            {
+                if (k < ViewStart || k > ViewStart + View) continue;
+                double x = X(k);
+                dc.DrawLine(kf, new Point(x, TrackTop), new Point(x, TrackTop + TrackH));
+            }
         }
 
+        // интервалы ретуши/запикивания
         foreach (var m in Markers)
         {
-            double y = TrackTop + TrackH + 3 + m.Lane * 6;
-            dc.DrawRectangle(m.Brush, null, new Rect(X(m.From), y, Math.Max(2, X(m.To) - X(m.From)), 4));
+            double y = LaneTop + m.Lane * (LaneH + 3);
+            double x1 = Math.Max(Pad, X(m.From)), x2 = Math.Min(Pad + W, X(m.To));
+            if (x2 <= x1) continue;
+            bool sel = ReferenceEquals(m.Tag, SelectedMarkerTag);
+            dc.DrawRectangle(m.Brush, sel ? new Pen(Brushes.White, 1) : null, new Rect(x1, y - (sel ? 1 : 0), x2 - x1, LaneH + (sel ? 2 : 0)));
         }
 
+        // маркеры фрагментов
         foreach (var s in Segments)
         {
             bool active = ReferenceEquals(s, ActiveSegment);
-            DrawMarker(dc, accent, X(s.InSec), true, active);
-            DrawMarker(dc, accent, X(s.OutSec), false, active);
+            if (s.InSec >= ViewStart && s.InSec <= ViewStart + View) DrawMarker(dc, accent, X(s.InSec), true, active);
+            if (s.OutSec >= ViewStart && s.OutSec <= ViewStart + View) DrawMarker(dc, accent, X(s.OutSec), false, active);
         }
 
-        double px = X(Position);
-        dc.DrawLine(new Pen(playhead, 2), new Point(px, 4), new Point(px, TrackTop + TrackH + 4));
-        var geo = new StreamGeometry();
-        using (var g = geo.Open()) { g.BeginFigure(new Point(px - 6, 0), true, true); g.LineTo(new Point(px + 6, 0), true, false); g.LineTo(new Point(px, 7), true, false); }
-        dc.DrawGeometry(playhead, null, geo);
+        // позиция
+        if (Position >= ViewStart && Position <= ViewStart + View)
+        {
+            double px = X(Position);
+            dc.DrawLine(new Pen(playhead, 2), new Point(px, RulerH), new Point(px, LaneTop + 2 * (LaneH + 3)));
+            var geo = new StreamGeometry();
+            using (var g = geo.Open()) { g.BeginFigure(new Point(px - 6, RulerH - 2), true, true); g.LineTo(new Point(px + 6, RulerH - 2), true, false); g.LineTo(new Point(px, RulerH + 5), true, false); }
+            dc.DrawGeometry(playhead, null, geo);
+        }
 
-        var tf = new Typeface("Segoe UI");
-        DrawText(dc, textBrush, TimeFormat.Format(0, false), Pad, h - 15, tf, HorizontalAlignment.Left);
-        DrawText(dc, textBrush, TimeFormat.Format(Duration, false), Pad + W, h - 15, tf, HorizontalAlignment.Right);
+        if (IsZoomed)
+        {
+            // полоска обзора: где мы в ролике
+            double y = h - 4;
+            dc.DrawRectangle(Ui.Solid(trackColor), null, new Rect(Pad, y, W, 3));
+            dc.DrawRectangle(Ui.Solid(accentColor, 0.8), null, new Rect(Pad + ViewStart / Duration * W, y, Math.Max(4, View / Duration * W), 3));
+        }
+    }
+
+    private static double NiceStep(double raw)
+    {
+        double[] steps = { 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600 };
+        foreach (var s in steps) if (s >= raw) return s;
+        return 600;
     }
 
     private static void DrawMarker(DrawingContext dc, Brush brush, double x, bool isIn, bool active)
@@ -112,20 +238,38 @@ public sealed class TimelineControl : FrameworkElement
         dc.DrawLine(new Pen(brush, active ? 2.5 : 1.5), new Point(x, TrackTop), new Point(x, TrackTop + TrackH));
     }
 
-    private static void DrawText(DrawingContext dc, Brush brush, string text, double x, double y, Typeface tf, HorizontalAlignment align)
-    {
-        var ft = new FormattedText(text, CultureInfo.CurrentCulture, FlowDirection.LeftToRight, tf, 10, brush, 1.0);
-        dc.DrawText(ft, new Point(align == HorizontalAlignment.Right ? x - ft.Width : x, y));
-    }
+    // ------------------------------------------------------------ мышь
 
     protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
     {
         if (Duration <= 0) return;
         var p = e.GetPosition(this);
-        _dragSegment = null;
+        _dragSegment = null; _dragMarker = null;
+        if (p.Y >= LaneTop - 3)
+        {
+            // границы интервалов ретуши/запикивания
+            double best = 7;
+            foreach (var m in Markers)
+            {
+                double y = LaneTop + m.Lane * (LaneH + 3);
+                if (p.Y < y - 3 || p.Y > y + LaneH + 3) continue;
+                double df = Math.Abs(p.X - X(m.From)), dt = Math.Abs(p.X - X(m.To));
+                if (df < best) { best = df; _dragMarker = m; _dragIsIn = true; }
+                if (dt < best) { best = dt; _dragMarker = m; _dragIsIn = false; }
+            }
+            if (_dragMarker is null)
+            {
+                var hit = Markers.LastOrDefault(m => p.Y >= LaneTop + m.Lane * (LaneH + 3) - 3 && p.Y <= LaneTop + m.Lane * (LaneH + 3) + LaneH + 3 && p.X >= X(m.From) && p.X <= X(m.To));
+                if (hit is not null) { SelectedMarkerTag = hit.Tag; MarkerSelected?.Invoke(hit); InvalidateVisual(); e.Handled = true; return; }
+            }
+            else
+            {
+                _drag = Drag.MarkerEdge; SelectedMarkerTag = _dragMarker.Tag; MarkerSelected?.Invoke(_dragMarker);
+                CaptureMouse(); e.Handled = true; return;
+            }
+        }
         if (p.Y < TrackTop + TrackH + 6)
         {
-            // ближайший маркер любого фрагмента
             double best = 8;
             foreach (var s in Segments)
             {
@@ -136,7 +280,7 @@ public sealed class TimelineControl : FrameworkElement
         }
         if (_dragSegment is not null)
         {
-            _drag = Drag.Edge;
+            _drag = Drag.SegmentEdge;
             if (!ReferenceEquals(ActiveSegment, _dragSegment)) { ActiveSegment = _dragSegment; ActiveSegmentChanged?.Invoke(_dragSegment); }
         }
         else
@@ -154,20 +298,45 @@ public sealed class TimelineControl : FrameworkElement
     protected override void OnMouseMove(MouseEventArgs e)
     {
         if (_drag == Drag.None || !IsMouseCaptured) return;
-        double t = Snap(T(e.GetPosition(this).X));
-        if (_drag == Drag.Seek) { SeekRequested?.Invoke(t); return; }
-        if (_dragSegment is null) return;
-        if (_dragIsIn) SegmentEdgeChanged?.Invoke(_dragSegment, true, Math.Min(t, _dragSegment.OutSec - 0.05));
-        else SegmentEdgeChanged?.Invoke(_dragSegment, false, Math.Max(t, _dragSegment.InSec + 0.05));
+        var p = e.GetPosition(this);
+        if (_drag == Drag.Pan) { ViewStart = Math.Clamp(_panStartView - (p.X - _panStartX) / W * View, 0, Math.Max(0, Duration - View)); InvalidateVisual(); return; }
+        double t = Snap(T(p.X));
+        switch (_drag)
+        {
+            case Drag.Seek: SeekRequested?.Invoke(t); break;
+            case Drag.SegmentEdge when _dragSegment is not null:
+                if (_dragIsIn) SegmentEdgeChanged?.Invoke(_dragSegment, true, Math.Min(t, _dragSegment.OutSec - 0.05));
+                else SegmentEdgeChanged?.Invoke(_dragSegment, false, Math.Max(t, _dragSegment.InSec + 0.05));
+                break;
+            case Drag.MarkerEdge when _dragMarker is not null:
+                t = T(p.X); // интервалы ретуши/звука не прилипают к ключевым кадрам
+                if (_dragIsIn) MarkerEdgeChanged?.Invoke(_dragMarker, true, Math.Min(t, _dragMarker.To - 0.05));
+                else MarkerEdgeChanged?.Invoke(_dragMarker, false, Math.Max(t, _dragMarker.From + 0.05));
+                break;
+        }
     }
 
     protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e)
     {
-        bool wasEdge = _drag == Drag.Edge;
-        _drag = Drag.None;
-        _dragSegment = null;
+        bool wasEdit = _drag is Drag.SegmentEdge or Drag.MarkerEdge;
+        _drag = Drag.None; _dragSegment = null; _dragMarker = null;
         ReleaseMouseCapture();
-        if (wasEdge) DragCompleted?.Invoke();
+        if (wasEdit) DragCompleted?.Invoke();
+    }
+
+    protected override void OnMouseDown(MouseButtonEventArgs e)
+    {
+        base.OnMouseDown(e);
+        if (e.ChangedButton == MouseButton.Middle && IsZoomed)
+        {
+            _drag = Drag.Pan; _panStartX = e.GetPosition(this).X; _panStartView = ViewStart; CaptureMouse(); e.Handled = true;
+        }
+    }
+
+    protected override void OnMouseUp(MouseButtonEventArgs e)
+    {
+        base.OnMouseUp(e);
+        if (e.ChangedButton == MouseButton.Middle && _drag == Drag.Pan) { _drag = Drag.None; ReleaseMouseCapture(); }
     }
 
     protected override void OnMouseRightButtonDown(MouseButtonEventArgs e)
@@ -177,7 +346,17 @@ public sealed class TimelineControl : FrameworkElement
         e.Handled = true;
     }
 
-    /// <summary>Ближайший ключевой кадр к t (или t, если ключевых кадров нет).</summary>
+    protected override void OnMouseWheel(MouseWheelEventArgs e)
+    {
+        if (Duration <= 0) return;
+        var p = e.GetPosition(this);
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) Zoom(e.Delta > 0 ? 1.25 : 0.8, T(p.X));
+        else Pan(-Math.Sign(e.Delta) * View * 0.1);
+        e.Handled = true;
+    }
+
+    // ------------------------------------------------------------ ключевые кадры
+
     public double NearestKeyframe(double t)
     {
         if (Keyframes.Count == 0) return t;
@@ -186,14 +365,8 @@ public sealed class TimelineControl : FrameworkElement
         return best;
     }
 
-    public double? PrevKeyframe(double t) => Keyframes.Count == 0 ? null : Keyframes.LastOrDefault(k => k < t - 0.001, double.NaN) is var v && !double.IsNaN(v) ? v : null;
-    public double? NextKeyframe(double t) => Keyframes.Count == 0 ? null : Keyframes.FirstOrDefault(k => k > t + 0.001, double.NaN) is var v && !double.IsNaN(v) ? v : null;
+    public double? PrevKeyframe(double t) { double v = double.NaN; foreach (var k in Keyframes) if (k < t - 0.001) v = k; return double.IsNaN(v) ? null : v; }
+    public double? NextKeyframe(double t) { foreach (var k in Keyframes) if (k > t + 0.001) return k; return null; }
 
-    public double Snap(double t)
-    {
-        if (!SnapToKeyframes || Keyframes.Count == 0) return t;
-        double best = t, dist = double.MaxValue;
-        foreach (var k in Keyframes) { var d = Math.Abs(k - t); if (d < dist) { dist = d; best = k; } }
-        return best;
-    }
+    public double Snap(double t) => SnapToKeyframes ? NearestKeyframe(t) : t;
 }
