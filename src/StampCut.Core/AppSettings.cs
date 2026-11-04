@@ -30,6 +30,8 @@ public sealed class AppSettings
     /// <summary>Оверлей по умолчанию, который применяется к каждому новому проекту.</summary>
     public string? DefaultOverlayPresetId { get; set; }
     public bool OpenFolderAfterExport { get; set; }
+    /// <summary>Пользователь закрыл предупреждение про драйвер для этой версии драйвера.</summary>
+    public string? DismissedDriverWarning { get; set; }
     public const int RecentLimit = 12;
 
     public static void Touch(List<string> list, string? value, int limit = RecentLimit)
@@ -89,4 +91,7 @@ public sealed class HardwareCache
     public List<HardwareEncoder> Encoders { get; set; } = new();
     public string HwAccel { get; set; } = "";
     public DateTime DetectedAtUtc { get; set; }
+    public string Recommendation { get; set; } = "";
+    public string GpuName { get; set; } = "";
+    public string NvidiaDriver { get; set; } = "";
 }

@@ -37,7 +37,9 @@ public sealed class SettingsWindow : Window
         encCombo.SelectedIndex = Array.IndexOf(encoders, st.Encoder);
         var hwDecode = Ui.Check("Аппаратное декодирование (D3D11VA)", st.HardwareDecode, _ => { });
         var alwaysProxy = Ui.Check("Всегда готовить прокси для просмотра (если видео не играет)", st.AlwaysUseProxy, _ => { });
-        var hwInfo = Ui.Label(s.Hardware is null ? "GPU ещё проверяется…" : $"Найдено: {(s.Hardware.Encoders.Count == 0 ? "только CPU" : string.Join(", ", s.Hardware.Encoders.Select(HardwareDetector.DisplayName)))}; декодирование: {(s.Hardware.PreferredHwAccel == "" ? "CPU" : s.Hardware.PreferredHwAccel)}", muted: true, size: 11);
+        var hwInfo = Ui.Label(s.Hardware is null ? "GPU ещё проверяется…" : $"Найдено: {(s.Hardware.Encoders.Count == 0 ? "только CPU" : string.Join(", ", s.Hardware.Encoders.Select(HardwareDetector.DisplayName)))}; декодирование: {(s.Hardware.PreferredHwAccel == "" ? "CPU" : s.Hardware.PreferredHwAccel)}"
+            + (string.IsNullOrEmpty(s.Hardware.NvidiaDriver) ? "" : $"\n{s.Hardware.GpuName}, драйвер NVIDIA {s.Hardware.NvidiaDriver}")
+            + (string.IsNullOrEmpty(s.CachedRecommendation) ? "" : "\n⚠ " + s.CachedRecommendation), muted: true, size: 11);
 
         // библиотека и ffmpeg
         var libDir = new TextBox { Text = st.LibraryDir ?? "", Width = 330, Padding = new Thickness(4, 3, 4, 3) };

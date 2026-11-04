@@ -16,6 +16,8 @@ public sealed class AppServices
     public Task HardwareReady { get; private set; } = Task.CompletedTask;
 
     public event Action? HardwareDetected;
+    /// <summary>Рекомендация по драйверу (из свежей проверки или из кэша).</summary>
+    public string CachedRecommendation { get; private set; } = "";
 
     public AppServices()
     {
@@ -51,7 +53,10 @@ public sealed class AppServices
                         FfmpegVersion = version, Encoders = cache.Encoders.ToList(),
                         HwAccels = string.IsNullOrEmpty(cache.HwAccel) ? new List<string>() : new List<string> { cache.HwAccel },
                         HasFilter_Tonemap = true, HasFilter_Zscale = true,
+                        GpuName = cache.GpuName, NvidiaDriver = cache.NvidiaDriver,
+                        NvencFailure = string.IsNullOrEmpty(cache.Recommendation) ? "" : "см. кэш",
                     };
+                    CachedRecommendation = cache.Recommendation;
                 }
                 else
                 {
@@ -59,7 +64,9 @@ public sealed class AppServices
                     Settings.Hardware = new HardwareCache
                     {
                         FfmpegVersion = version, Encoders = Hardware.Encoders.ToList(), HwAccel = Hardware.PreferredHwAccel, DetectedAtUtc = DateTime.UtcNow,
+                        Recommendation = Hardware.Recommendation, GpuName = Hardware.GpuName, NvidiaDriver = Hardware.NvidiaDriver,
                     };
+                    CachedRecommendation = Hardware.Recommendation;
                     // сохранение — в обработчике HardwareDetected на UI-потоке: настройки правятся только там
                 }
                 Logger.Info($"GPU: кодеры [{string.Join(", ", Hardware.Encoders)}], декодирование {Hardware.PreferredHwAccel}");

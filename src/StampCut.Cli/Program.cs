@@ -82,6 +82,8 @@ public static class Program
         Console.WriteLine("Кодеры: " + (caps.Encoders.Count == 0 ? "только CPU (libx264)" : string.Join(", ", caps.Encoders.Select(HardwareDetector.DisplayName))));
         Console.WriteLine("Аппаратное декодирование: " + (caps.PreferredHwAccel == "" ? "нет" : caps.PreferredHwAccel) + $" (доступно: {string.Join(", ", caps.HwAccels)})");
         Console.WriteLine($"Фильтры HDR→SDR: zscale={caps.HasFilter_Zscale} tonemap={caps.HasFilter_Tonemap}");
+        if (!string.IsNullOrEmpty(caps.NvidiaDriver)) Console.WriteLine($"NVIDIA: {caps.GpuName}, драйвер {caps.NvidiaDriver}");
+        if (!string.IsNullOrEmpty(caps.Recommendation)) Console.WriteLine("⚠ " + caps.Recommendation + "\n  Скачать: https://www.nvidia.com/Download/index.aspx");
         return 0;
     }
 

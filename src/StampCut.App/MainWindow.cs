@@ -63,7 +63,12 @@ public sealed partial class MainWindow : Window
         WireEvents();
         _timeline.SnapToKeyframes = _preset.StreamCopy;
 
-        _s.HardwareDetected += () => Dispatcher.Invoke(() => { _statusHw.Text = _s.HardwareSummary(); try { _s.Settings.Save(); } catch (Exception ex) { Logger.Warn("Настройки: " + ex.Message); } });
+        _s.HardwareDetected += () => Dispatcher.Invoke(() =>
+        {
+            _statusHw.Text = _s.HardwareSummary();
+            try { _s.Settings.Save(); } catch (Exception ex) { Logger.Warn("Настройки: " + ex.Message); }
+            ShowDriverRecommendation();
+        });
         _statusHw.Text = _s.HardwareSummary();
         _s.StartHardwareDetection();
         if (!_s.Ffmpeg.IsResolved) ShowInfo("FFmpeg не найден. Положите ffmpeg.exe и ffprobe.exe в папку tools\\ffmpeg рядом с программой или укажите путь в настройках.", InfoKind.Error);
@@ -219,6 +224,18 @@ public sealed partial class MainWindow : Window
             default: return;
         }
         e.Handled = true;
+    }
+
+    private void ShowDriverRecommendation()
+    {
+        var rec = _s.CachedRecommendation;
+        if (string.IsNullOrEmpty(rec) || _infoBar.Visibility == Visibility.Visible) return;
+        var key = (_s.Hardware?.NvidiaDriver ?? "") + "|" + (_s.Hardware?.FfmpegVersion ?? "");
+        if (_s.Settings.DismissedDriverWarning == key) return;
+        ShowInfo(rec, InfoKind.Warning,
+            ("Скачать драйвер NVIDIA", () => TryStart("https://www.nvidia.com/Download/index.aspx")),
+            ("Проверить снова", () => { _s.StartHardwareDetection(force: true); _statusHw.Text = "GPU: проверка…"; HideInfo(); }),
+            ("Больше не напоминать", () => { _s.Settings.DismissedDriverWarning = key; try { _s.Settings.Save(); } catch { } HideInfo(); }));
     }
 
     /// <summary>Запуск задачи «в фоне» так, чтобы её ошибка попала в журнал и в полосу уведомлений, а не потерялась.</summary>
