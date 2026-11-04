@@ -30,11 +30,17 @@ public static class Program
         app.DispatcherUnhandledException += (_, e) =>
         {
             Logger.Error("Необработанная ошибка", e.Exception);
-            MessageBox.Show(Lang.T("Произошла ошибка:") + "\n" + e.Exception.Message + "\n\n" + Lang.T("Подробности в журнале:") + "\n" + Logger.CurrentFile,
-                "StampCut", MessageBoxButton.OK, MessageBoxImage.Error);
             e.Handled = true;
+            try { CrashDialog.Show(Lang.T("Произошла ошибка"), e.Exception, app.MainWindow as MainWindow); }
+            catch (Exception ex2) { Logger.Error("Окно отчёта", ex2); }
         };
-        AppDomain.CurrentDomain.UnhandledException += (_, e) => Logger.Error("Фатальная ошибка", e.ExceptionObject as Exception);
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+        {
+            var ex = e.ExceptionObject as Exception;
+            Logger.Error("Фатальная ошибка", ex);
+            // процесс сейчас умрёт: сохраняем отчёт, предложим отправить при следующем запуске
+            try { CrashReporter.Save(CrashReporter.Build("Фатальная ошибка (приложение закрылось)", ex, (app.MainWindow as MainWindow)?.Services)); } catch { }
+        };
         TaskScheduler.UnobservedTaskException += (_, e) => { Logger.Error("Необработанная ошибка задачи", e.Exception); e.SetObserved(); };
 
         Logger.Info("StampCut " + MainWindow.AppVersion + " запуск: " + string.Join(" ", args));

@@ -18,6 +18,7 @@ namespace StampCut.App;
 public sealed partial class MainWindow : Window
 {
     private readonly AppServices _s;
+    public AppServices Services => _s;
     private readonly ProxyService _proxy;
 
     private readonly List<Clip> _clips = new();
@@ -100,6 +101,8 @@ public sealed partial class MainWindow : Window
         {
             if (filesToOpen.Count > 0) await OpenAnyAsync(filesToOpen, replace: true);
             else await OfferAutosaveRestoreAsync(null);
+            OfferPendingCrashReport();
+            Fire(CheckUpdatesAsync(manual: false));
         };
         Closing += (_, e) =>
         {
@@ -133,6 +136,8 @@ public sealed partial class MainWindow : Window
         recentButton.Click += (_, _) => ShowRecentMenu(recentButton);
         var projectButton = Ui.Button(T("Проект ▾"), () => { }, tooltip: T("Сохранить или открыть проект"));
         projectButton.Click += (_, _) => ShowProjectMenu(projectButton);
+        var helpButton = Ui.Button("?", () => { }, tooltip: T("О программе, обновления, отчёт о проблеме"), minWidth: 34);
+        helpButton.Click += (_, _) => ShowHelpMenu(helpButton);
         foreach (var b in new[]
         {
             Ui.Button(T("Открыть…"), () => OpenFiles(replace: true), tooltip: T("Открыть видео (Ctrl+O)")),
@@ -140,6 +145,7 @@ public sealed partial class MainWindow : Window
             Ui.Button(T("+ Добавить ролик"), () => OpenFiles(replace: false), tooltip: T("Добавить ролик для склейки")),
             projectButton,
             Ui.Button(T("Настройки"), OpenSettings),
+            helpButton,
         })
         {
             b.Height = 30; b.Padding = new Thickness(10, 0, 10, 0);
@@ -548,6 +554,62 @@ public sealed partial class MainWindow : Window
         var mark = dirty ? "• " : "";
         Title = project is null ? $"{mark}StampCut {AppVersion}" : $"{mark}{project} — StampCut {AppVersion}";
         _titleText.Text = mark + (project is null ? "StampCut" : project);
+    }
+
+    // ------------------------------------------------------------------ справка, отчёты, обновления
+
+    private void ShowHelpMenu(Button anchor)
+    {
+        var menu = new ContextMenu { PlacementTarget = anchor, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
+        void Item(string text, Action action) { var mi = new MenuItem { Header = text }; mi.Click += (_, _) => action(); menu.Items.Add(mi); }
+        Item(T("О программе…"), () => new AboutWindow(_s, () => CheckUpdatesAsync(manual: true), () => ReportProblem(T("Проблема в StampCut"), null, null)) { Owner = this }.ShowDialog());
+        Item(T("Проверить обновления"), () => Fire(CheckUpdatesAsync(manual: true)));
+        Item(T("Сообщить о проблеме…"), () => ReportProblem(T("Проблема в StampCut"), null, null));
+        Item(T("Страница релизов"), () => TryStart(CrashReporter.ReleasesUrl));
+        Item(T("Открыть папку журналов"), () => TryStart(Logger.CurrentFile));
+        menu.IsOpen = true;
+    }
+
+    /// <summary>Отчёт о проблеме: текст в буфер обмена и форма issue на GitHub с заполненным описанием.</summary>
+    private void ReportProblem(string title, Exception? ex, string? extra)
+    {
+        var report = CrashReporter.Build(title, ex, _s, extra);
+        CrashReporter.OpenIssue($"[{AppVersion}] {title}", report);
+        _statusInfo.Text = T("Отчёт скопирован в буфер обмена и открыт в браузере");
+    }
+
+    private void OfferPendingCrashReport()
+    {
+        var pending = CrashReporter.PendingReport();
+        if (pending is null) return;
+        ShowInfo(T("В прошлый раз программа завершилась с ошибкой. Отправить отчёт разработчику? Он откроется в браузере, вы увидите его текст."), InfoKind.Warning,
+            (T("Отправить отчёт"), () => { try { CrashReporter.OpenIssue($"[{AppVersion}] {T("Сбой приложения")}", File.ReadAllText(pending)); } catch { } CrashReporter.MarkReported(pending); HideInfo(); }),
+            (T("Открыть папку отчётов"), () => TryStart(CrashReporter.CrashDir)),
+            (T("Не отправлять"), () => { CrashReporter.MarkReported(pending); HideInfo(); }));
+    }
+
+    private async Task CheckUpdatesAsync(bool manual)
+    {
+        if (!manual)
+        {
+            if (!_s.Settings.CheckUpdates || (DateTime.UtcNow - _s.Settings.LastUpdateCheckUtc) < TimeSpan.FromHours(20)) return;
+        }
+        try
+        {
+            var info = await UpdateChecker.CheckAsync(CancellationToken.None);
+            _s.Settings.LastUpdateCheckUtc = DateTime.UtcNow;
+            try { _s.Settings.Save(); } catch { }
+            if (info is null) { if (manual) ShowInfo($"{T("У вас последняя версия")} ({AppVersion}).", InfoKind.Success); return; }
+            if (!manual && _s.Settings.SkippedUpdateVersion == info.Version) return;
+            ShowInfo($"{T("Доступна новая версия")} {info.Version} ({T("у вас")} {AppVersion}).", InfoKind.Info,
+                (T("Скачать"), () => TryStart(info.Url)),
+                (T("Пропустить эту версию"), () => { _s.Settings.SkippedUpdateVersion = info.Version; try { _s.Settings.Save(); } catch { } HideInfo(); }));
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn("Проверка обновлений: " + ex.Message);
+            if (manual) ShowInfo(T("Не удалось проверить обновления: ") + ex.Message, InfoKind.Warning, (T("Страница релизов"), () => TryStart(CrashReporter.ReleasesUrl)));
+        }
     }
 
     // ------------------------------------------------------------------ вставка из буфера

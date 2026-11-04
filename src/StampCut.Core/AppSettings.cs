@@ -22,6 +22,9 @@ public sealed class AppSettings
     public double Volume { get; set; } = 0.8;
     /// <summary>Тема: system / light / dark.</summary>
     public string Theme { get; set; } = "system";
+    public bool CheckUpdates { get; set; } = true;
+    public DateTime LastUpdateCheckUtc { get; set; }
+    public string? SkippedUpdateVersion { get; set; }
     public double LeftPanelWidth { get; set; } = 240;
     public double RightPanelWidth { get; set; } = 340;
     public double WindowWidth { get; set; } = 1380;

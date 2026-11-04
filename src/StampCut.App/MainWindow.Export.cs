@@ -189,9 +189,14 @@ public sealed partial class MainWindow
         {
             _statusInfo.Text = outcome.Message.Split('\n')[0];
             Logger.Error("Экспорт не удался: " + outcome.Message + "\n" + outcome.CommandLine);
-            ShowInfo(outcome.Message.Replace('\n', ' '), outcome.Message.Contains(T("Экспорт отменён"), StringComparison.OrdinalIgnoreCase) ? InfoKind.Warning : InfoKind.Error,
-                (T("Скопировать команду ffmpeg"), () => { try { Clipboard.SetText(outcome.CommandLine); } catch { } }),
-                (T("Открыть журнал"), () => TryStart(Logger.CurrentFile)));
+            bool cancelled = outcome.Message.Contains(T("Экспорт отменён"), StringComparison.OrdinalIgnoreCase);
+            if (cancelled)
+                ShowInfo(outcome.Message, InfoKind.Warning);
+            else
+                ShowInfo(outcome.Message.Replace('\n', ' '), InfoKind.Error,
+                    (T("Сообщить о проблеме"), () => ReportProblem(T("Ошибка экспорта"), null, "```\n" + outcome.Message + "\n```\n\nКоманда:\n```\n" + outcome.CommandLine + "\n```")),
+                    (T("Скопировать команду ffmpeg"), () => { try { Clipboard.SetText(outcome.CommandLine); } catch { } }),
+                    (T("Открыть журнал"), () => TryStart(Logger.CurrentFile)));
         }
     }
 

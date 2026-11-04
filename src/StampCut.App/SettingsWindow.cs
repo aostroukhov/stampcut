@@ -41,6 +41,7 @@ public sealed class SettingsWindow : Window
         var fixedDir = new TextBox { Text = st.OutputDir ?? "", Width = 330, Height = Ui.ControlHeight, Padding = new Thickness(4, 0, 4, 0), VerticalContentAlignment = VerticalAlignment.Center };
         var pattern = new TextBox { Text = st.FileNamePattern, Width = 200, Height = Ui.ControlHeight, Padding = new Thickness(4, 0, 4, 0), VerticalContentAlignment = VerticalAlignment.Center };
         var openAfter = Ui.Check(T("После экспорта показать файл в проводнике"), st.OpenFolderAfterExport, _ => { });
+        var checkUpdates = Ui.Check(T("Проверять новые версии при запуске (раз в сутки)"), st.CheckUpdates, _ => { });
 
         // GPU
         var encoders = new[] { HardwareEncoder.Auto, HardwareEncoder.None, HardwareEncoder.Nvenc, HardwareEncoder.Qsv, HardwareEncoder.Amf, HardwareEncoder.MediaFoundation };
@@ -65,6 +66,7 @@ public sealed class SettingsWindow : Window
             st.FileNamePattern = string.IsNullOrWhiteSpace(pattern.Text) ? "{name}{suffix}" : pattern.Text.Trim();
             st.Encoder = encoders[Math.Max(0, encCombo.SelectedIndex)];
             st.OpenFolderAfterExport = openAfter.IsChecked == true;
+            st.CheckUpdates = checkUpdates.IsChecked == true;
             st.HardwareDecode = hwDecode.IsChecked == true;
             st.AlwaysUseProxy = alwaysProxy.IsChecked == true;
             st.LibraryDir = string.IsNullOrWhiteSpace(libDir.Text) ? null : libDir.Text.Trim();
@@ -84,6 +86,7 @@ public sealed class SettingsWindow : Window
                 {
                     Ui.Header(T("ВНЕШНИЙ ВИД")),
                     Ui.Row(Ui.Label(T("Тема:"), muted: true), themeCombo, Ui.Label(T("Язык:"), muted: true), langCombo),
+                    checkUpdates,
                     Gap(), Ui.Header(T("КУДА СОХРАНЯТЬ")),
                     rbNext, rbLast, Ui.Row(rbFixed, fixedDir, Ui.SmallButton("…", () => PickFolder(fixedDir))),
                     Ui.Row(Ui.Label(T("Имя файла:"), muted: true), pattern, Ui.Label("{name} {suffix} {date} {time}", muted: true, size: Ui.FontCaption)),
