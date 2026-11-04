@@ -45,13 +45,22 @@ public static class Program
 
         Logger.Info("StampCut " + MainWindow.AppVersion + " запуск: " + string.Join(" ", args));
         var files = args.Where(File.Exists).Select(Path.GetFullPath).ToList();
+        // один экземпляр: если программа уже открыта — отдаём ей файлы и выходим
+        var instance = new SingleInstance();
+        if (!instance.IsFirst)
+        {
+            if (files.Count > 0 && SingleInstance.SendToRunning(files)) return 0;
+            if (files.Count == 0 && SingleInstance.SendToRunning(new[] { "" })) return 0; // просто показать окно
+        }
         // окно создаём после старта приложения: только тогда ресурсы темы Fluent уже загружены
         app.Startup += (_, _) =>
         {
             var window = new MainWindow(files, settings);
             app.MainWindow = window;
             window.Show();
+            instance.Listen(list => window.Dispatcher.BeginInvoke(() => window.OpenFromOtherInstance(list.Where(File.Exists).ToList())));
         };
+        app.Exit += (_, _) => instance.Dispose();
         return app.Run();
     }
 }

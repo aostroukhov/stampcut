@@ -35,6 +35,9 @@ public sealed class TimelineControl : FrameworkElement
     public bool ShowKeyframes { get; set; } = true;
     /// <summary>Огибающая звука 0..1, WaveformRate значений в секунду; null — нет звука или ещё считается.</summary>
     public float[]? Waveform { get; set; }
+    /// <summary>Полоска кадров (N кадров в ряд) на всю длительность ролика.</summary>
+    public System.Windows.Media.Imaging.BitmapSource? Filmstrip { get; set; }
+    public int FilmstripFrames { get; set; } = 40;
     public double WaveformRate { get; set; } = 100;
     public bool Muted { get; set; }
 
@@ -60,11 +63,11 @@ public sealed class TimelineControl : FrameworkElement
     public bool IsDragging => _drag != Drag.None;
 
     private const double Pad = 10;
-    private const double RulerH = 14, TrackTop = 16, TrackH = 20, WaveTop = 40, WaveH = 26, LaneTop = 70, LaneH = 5;
+    private const double RulerH = 14, StripTop = 15, StripH = 40, TrackTop = 57, TrackH = 20, WaveTop = 80, WaveH = 24, LaneTop = 108, LaneH = 5;
 
     public TimelineControl()
     {
-        Height = 96;
+        Height = 132;
         Focusable = false;
         Cursor = Cursors.Hand;
         ClipToBounds = true;
@@ -128,6 +131,24 @@ public sealed class TimelineControl : FrameworkElement
             var ft = new FormattedText(TimeFormat.Format(t, step < 1), CultureInfo.CurrentCulture, FlowDirection.LeftToRight, tf, 10, textBrush, 1.0);
             dc.DrawText(ft, new Point(x + 2, 0));
         }
+
+        // полоска кадров: показываем ту часть, что в окне просмотра
+        if (Filmstrip is { } strip && Duration > 0)
+        {
+            double fx = ViewStart / Duration * strip.PixelWidth, fw = View / Duration * strip.PixelWidth;
+            if (fw >= 1)
+            {
+                dc.PushClip(new RectangleGeometry(new Rect(Pad, StripTop, W, StripH)));
+                try
+                {
+                    var crop = new System.Windows.Media.Imaging.CroppedBitmap(strip, new Int32Rect((int)Math.Clamp(fx, 0, strip.PixelWidth - 1), 0, (int)Math.Clamp(fw, 1, strip.PixelWidth - (int)Math.Clamp(fx, 0, strip.PixelWidth - 1)), strip.PixelHeight));
+                    dc.DrawImage(crop, new Rect(Pad, StripTop, W, StripH));
+                }
+                catch { }
+                dc.Pop();
+            }
+        }
+        else dc.DrawRectangle(Ui.Solid(trackColor, 0.35), null, new Rect(Pad, StripTop, W, StripH));
 
         // дорожка и фрагменты
         dc.DrawRoundedRectangle(track, null, new Rect(Pad, TrackTop, W, TrackH), 4, 4);
@@ -204,7 +225,7 @@ public sealed class TimelineControl : FrameworkElement
         if (Position >= ViewStart && Position <= ViewStart + View)
         {
             double px = X(Position);
-            dc.DrawLine(new Pen(playhead, 2), new Point(px, RulerH), new Point(px, LaneTop + 2 * (LaneH + 3)));
+            dc.DrawLine(new Pen(playhead, 1.5), new Point(px, RulerH), new Point(px, LaneTop + 2 * (LaneH + 3)));
             var geo = new StreamGeometry();
             using (var g = geo.Open()) { g.BeginFigure(new Point(px - 6, RulerH - 2), true, true); g.LineTo(new Point(px + 6, RulerH - 2), true, false); g.LineTo(new Point(px, RulerH + 5), true, false); }
             dc.DrawGeometry(playhead, null, geo);
@@ -268,7 +289,7 @@ public sealed class TimelineControl : FrameworkElement
                 CaptureMouse(); e.Handled = true; return;
             }
         }
-        if (p.Y < TrackTop + TrackH + 6)
+        if (p.Y >= TrackTop - 6 && p.Y < TrackTop + TrackH + 6)
         {
             double best = 8;
             foreach (var s in Segments)

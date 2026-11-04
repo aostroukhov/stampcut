@@ -56,6 +56,7 @@ public sealed partial class MainWindow : Window
         _s = new AppServices(settings);
         _proxy = new ProxyService(_s);
         _waveform = new WaveformService(_s);
+        _filmstrip = new FilmstripService(_s);
         _exportPresets = _s.Presets.LoadExportPresets();
         _preset = _exportPresets.FirstOrDefault(p => p.Id == _s.Settings.LastExportPresetId) ?? _exportPresets[0];
         _overlayPresets = _s.Presets.LoadOverlayPresets();
@@ -114,6 +115,7 @@ public sealed partial class MainWindow : Window
             _exportCts?.Cancel();
             _proxyCts?.Cancel();
             _waveformCts?.Cancel();
+            _beep.Dispose();
             _s.Settings.WindowMaximized = WindowState == WindowState.Maximized;
             if (WindowState == WindowState.Normal) { _s.Settings.WindowWidth = Width; _s.Settings.WindowHeight = Height; }
             try { _s.Settings.Save(); } catch { }
@@ -366,6 +368,7 @@ public sealed partial class MainWindow : Window
 
     private void ApplyGainToPlayer()
     {
+        if (_censorMuted) return; // внутри «запиканного» интервала громкость держим на нуле
         double db = _current?.AudioGainDb ?? 0;
         _preview.Player.Volume = _current?.IsMuted == true ? 0 : Math.Clamp(0.5 * Math.Pow(10, db / 20.0), 0, 1);
     }
@@ -554,6 +557,14 @@ public sealed partial class MainWindow : Window
         var mark = dirty ? "• " : "";
         Title = project is null ? $"{mark}StampCut {AppVersion}" : $"{mark}{project} — StampCut {AppVersion}";
         _titleText.Text = mark + (project is null ? "StampCut" : project);
+    }
+
+    /// <summary>Файлы от второго экземпляра (двойной клик в проводнике при открытой программе).</summary>
+    public void OpenFromOtherInstance(IReadOnlyList<string> files)
+    {
+        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        Activate();
+        Fire(OpenAnyAsync(files, replace: true));
     }
 
     // ------------------------------------------------------------------ справка, отчёты, обновления

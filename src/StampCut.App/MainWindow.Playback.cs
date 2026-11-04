@@ -217,6 +217,23 @@ public sealed partial class MainWindow
 
     private double _jumpTarget = -1;
     private DateTime _jumpAt;
+    private readonly BeepPlayer _beep = new();
+    private bool _censorMuted;
+
+    /// <summary>Предпросмотр «запикивания»: внутри интервала звук ролика глушится, для «пика» звучит тон 1 кГц.</summary>
+    private void ApplyCensorPreview(double pos)
+    {
+        if (_current is null || _isImageClip) return;
+        AudioCensor? inside = _playing ? _current.Censors.FirstOrDefault(c => pos >= c.FromSec && pos < c.ToSec) : null;
+        if (inside is null)
+        {
+            if (_censorMuted) { _censorMuted = false; ApplyGainToPlayer(); }
+            _beep.Stop();
+            return;
+        }
+        if (!_censorMuted) { _censorMuted = true; _preview.Player.Volume = 0; }
+        if (inside.Mode == CensorMode.Beep && !_current.IsMuted) _beep.Start(); else _beep.Stop();
+    }
 
     private void OnTick()
     {
@@ -235,6 +252,7 @@ public sealed partial class MainWindow
         }
         else pos = _preview.Player.Position.TotalSeconds;
         _lastPosition = pos;
+        ApplyCensorPreview(pos);
         if (_playing && !_followEdit && !_isImageClip && pos >= _current.Media.DurationSec - 0.02) { Pause(); UpdateTimeUi(pos); return; }
         if (_playing && _followEdit && !_timeline.IsDragging && !FollowEditTick(pos)) return;
         UpdateTimeUi(pos);
@@ -346,6 +364,8 @@ public sealed partial class MainWindow
         if (_mediaReady && !_isImageClip) _preview.Player.Pause();
         _playing = false;
         _playButton.Content = "▶";
+        _beep.Stop();
+        if (_censorMuted) { _censorMuted = false; ApplyGainToPlayer(); }
         RequestFilteredFrame();
     }
 

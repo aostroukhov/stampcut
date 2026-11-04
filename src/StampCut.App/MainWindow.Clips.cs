@@ -217,7 +217,7 @@ public sealed partial class MainWindow
         _timer.Stop();
         _mediaReady = false; _isImageClip = false;
         _preview.CurrentClip = null; _preview.Player.Source = null; _preview.ShowPoster(null); _preview.ShowMessage(null); _preview.Refresh();
-        _timeline.SetDuration(0); _timeline.Segments = new List<Segment>(); _timeline.ActiveSegment = null; _timeline.Waveform = null; _timeline.InvalidateVisual();
+        _timeline.SetDuration(0); _timeline.Segments = new List<Segment>(); _timeline.ActiveSegment = null; _timeline.Waveform = null; _timeline.Filmstrip = null; _timeline.InvalidateVisual();
         _statusInfo.Text = T("Перетащите видео в окно или нажмите «Открыть»");
         _fragmentText.Text = "";
         _timeText.Text = "00:00.000 / 00:00.000";
@@ -234,7 +234,7 @@ public sealed partial class MainWindow
         _preview.CurrentClip = clip;
         _preview.SetVideoSize(clip.Media.Width, clip.Media.Height);
         _preview.SetFilters(clip.Filters);
-        if (!keepPlayer) { _timeline.SetDuration(clip.Media.DurationSec); _timeline.Waveform = null; }
+        if (!keepPlayer) { _timeline.SetDuration(clip.Media.DurationSec); _timeline.Waveform = null; _timeline.Filmstrip = null; }
         _timeline.Segments = clip.Segments;
         _timeline.ActiveSegment = null;
         _timeline.Muted = clip.IsMuted;
@@ -251,7 +251,20 @@ public sealed partial class MainWindow
         }
         _timeline.Keyframes = Array.Empty<double>();
         Fire(LoadIntoPlayerAsync(clip, startAt, autoplay)); // просмотр готовится в фоне, интерфейс не ждёт прокси
-        if (!clip.Media.IsImage) { Fire(LoadKeyframesAsync(clip)); Fire(LoadWaveformAsync(clip)); }
+        if (!clip.Media.IsImage) { Fire(LoadKeyframesAsync(clip)); Fire(LoadWaveformAsync(clip)); Fire(LoadFilmstripAsync(clip)); }
+    }
+
+    private readonly FilmstripService _filmstrip;
+
+    private async Task LoadFilmstripAsync(Clip clip)
+    {
+        try
+        {
+            var strip = await _filmstrip.GetAsync(clip.Media, _waveformCts?.Token ?? CancellationToken.None);
+            if (ReferenceEquals(clip, _current)) { _timeline.Filmstrip = strip; _timeline.FilmstripFrames = FilmstripService.Frames; _timeline.InvalidateVisual(); }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { Logger.Warn("Полоска кадров: " + ex.Message); }
     }
 
     private readonly WaveformService _waveform;
