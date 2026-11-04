@@ -327,7 +327,7 @@ public sealed class TimelineControl : FrameworkElement
     protected override void OnMouseDown(MouseButtonEventArgs e)
     {
         base.OnMouseDown(e);
-        if (e.ChangedButton == MouseButton.Middle && IsZoomed)
+        if (e.ChangedButton == MouseButton.Middle && IsZoomed && _drag == Drag.None)
         {
             _drag = Drag.Pan; _panStartX = e.GetPosition(this).X; _panStartView = ViewStart; CaptureMouse(); e.Handled = true;
         }

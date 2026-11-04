@@ -59,7 +59,7 @@ public sealed class WaveformService
                 if (got < buf.Length) break;
             }
         }
-        catch (OperationCanceledException) { ProcessRunner.TryKill(p); throw; }
+        catch { ProcessRunner.TryKill(p); throw; }
         try { await p.WaitForExitAsync(ct); } catch { ProcessRunner.TryKill(p); }
         if (peaks.Count == 0) return null;
         // нормировка: тихие ролики тоже должны быть видны

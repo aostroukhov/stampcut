@@ -45,6 +45,7 @@ public sealed partial class MainWindow
         UpdateExportInfo();
         _timeline.SnapToKeyframes = p.StreamCopy;
         _timeline.InvalidateVisual();
+        CommitNow();
     }
 
     private void RefreshPresetCombos()

@@ -45,13 +45,13 @@ public sealed partial class MainWindow
         _history.Reset(Snapshot(), saved: true);
     }
 
-    private void Undo() => RestoreFromHistory(_history.Undo());
-    private void Redo() => RestoreFromHistory(_history.Redo());
+    // сначала записать незавершённую правку, и только потом двигаться по истории — иначе она ляжет поверх восстановленного состояния
+    private void Undo() { CommitNow(); RestoreFromHistory(_history.Undo()); }
+    private void Redo() { CommitNow(); RestoreFromHistory(_history.Redo()); }
 
     private void RestoreFromHistory(ProjectFile? pf)
     {
         if (pf is null) return;
-        CommitNow();
         _restoring = true;
         try { RestoreSnapshot(pf); }
         finally { _restoring = false; }
@@ -71,7 +71,7 @@ public sealed partial class MainWindow
         _selectedOverlay = _overlays.LastOrDefault()?.Settings;
         _preview.Overlays.Clear(); _preview.Overlays.AddRange(_overlays);
         _preview.SelectedOverlay = _selectedOverlay;
-        if (_exportPresets.FirstOrDefault(p => p.Id == result.ExportPresetId) is { } preset && !ReferenceEquals(preset, _preset)) { _preset = preset; RefreshPresetCombos(); }
+        if (_exportPresets.FirstOrDefault(p => p.Id == result.ExportPresetId) is { } preset && !ReferenceEquals(preset, _preset)) { _preset = preset; RefreshPresetCombos(); _timeline.SnapToKeyframes = _preset.StreamCopy; }
         _activeSegment = null; _selectedRedaction = null;
         RefreshClipList(); SyncOverlayPanel(); UpdateExportInfo();
         if (_clips.Count == 0) { _current = null; ClearPreview(); return; }
@@ -94,6 +94,7 @@ public sealed partial class MainWindow
         var r = MessageBox.Show(this, T("Сохранить изменения в проекте?"), "StampCut", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
         if (r == MessageBoxResult.Cancel) return false;
         if (r == MessageBoxResult.Yes) return SaveProject(saveAs: false);
+        DeleteAutosave(_projectPath); // пользователь осознанно отказался от изменений — резервную копию не предлагать
         return true;
     }
 
@@ -152,6 +153,6 @@ public sealed partial class MainWindow
         var when = File.GetLastWriteTime(auto);
         var r = MessageBox.Show(this, $"{T("Найдена резервная копия проекта от")} {when:g}. {T("Восстановить её?")}", "StampCut", MessageBoxButton.YesNo, MessageBoxImage.Question);
         if (r != MessageBoxResult.Yes) { DeleteAutosave(projectPath); return; }
-        await OpenProjectAsync(auto, asAutosaveOf: projectPath);
+        await OpenProjectAsync(auto, asAutosaveOf: projectPath ?? "");
     }
 }

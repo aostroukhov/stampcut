@@ -255,14 +255,19 @@ public sealed partial class MainWindow
     }
 
     private readonly WaveformService _waveform;
+    private CancellationTokenSource? _waveformCts;
 
     private async Task LoadWaveformAsync(Clip clip)
     {
+        _waveformCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        _waveformCts = cts;
         try
         {
-            var wf = await _waveform.GetAsync(clip.Media, CancellationToken.None);
-            if (ReferenceEquals(clip, _current)) { _timeline.Waveform = wf; _timeline.WaveformRate = WaveformService.Rate; _timeline.InvalidateVisual(); }
+            var wf = await _waveform.GetAsync(clip.Media, cts.Token);
+            if (ReferenceEquals(clip, _current) && !cts.IsCancellationRequested) { _timeline.Waveform = wf; _timeline.WaveformRate = WaveformService.Rate; _timeline.InvalidateVisual(); }
         }
+        catch (OperationCanceledException) { }
         catch (Exception ex) { Logger.Warn("Волна звука: " + ex.Message); }
     }
 

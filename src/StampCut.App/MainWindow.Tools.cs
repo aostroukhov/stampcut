@@ -90,25 +90,26 @@ public sealed partial class MainWindow
                 _selectedOverlay.File = tag;
                 LoadOverlayImage(ItemOf(_selectedOverlay));
                 _preview.Refresh();
+                ScheduleCommit();
             }
         };
         _opacitySlider = Ui.Slider(0, 100, 80, v => { if (_selectedOverlay is null || _syncing) return; _selectedOverlay.Opacity = v / 100.0; _opacityText.Text = $"{v:0} %"; _preview.Refresh(); ScheduleCommit(); }, width: 0);
         _ovWhole = new RadioButton { Content = T("весь ролик"), IsChecked = true, Margin = new Thickness(0, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center, Focusable = false };
         _ovRange = new RadioButton { Content = T("с"), VerticalAlignment = VerticalAlignment.Center, Focusable = false };
-        _ovFrom = Ui.NumberBox(0, v => { if (_selectedOverlay is null) return; _selectedOverlay.FromSec = v; _ovRange.IsChecked = true; _preview.Refresh(); }, 52, "0.#");
-        _ovTo = Ui.NumberBox(5, v => { if (_selectedOverlay is null) return; _selectedOverlay.ToSec = v; _ovRange.IsChecked = true; _preview.Refresh(); }, 52, "0.#");
-        _ovWhole.Checked += (_, _) => { if (_selectedOverlay is null || _syncing) return; _selectedOverlay.FromSec = null; _selectedOverlay.ToSec = null; _preview.Refresh(); };
-        _ovRange.Checked += (_, _) => { if (_selectedOverlay is null || _syncing) return; _selectedOverlay.FromSec ??= 0; _selectedOverlay.ToSec ??= 5; SyncOverlayPanel(); _preview.Refresh(); };
-        _fadeIn = Ui.NumberBox(0, v => { if (_selectedOverlay is null) return; _selectedOverlay.FadeInSec = Math.Max(0, v); }, 44, "0.#");
-        _fadeOut = Ui.NumberBox(0, v => { if (_selectedOverlay is null) return; _selectedOverlay.FadeOutSec = Math.Max(0, v); }, 44, "0.#");
+        _ovFrom = Ui.NumberBox(0, v => { if (_selectedOverlay is null) return; _selectedOverlay.FromSec = v; _ovRange.IsChecked = true; _preview.Refresh(); ScheduleCommit(); }, 52, "0.#");
+        _ovTo = Ui.NumberBox(5, v => { if (_selectedOverlay is null) return; _selectedOverlay.ToSec = v; _ovRange.IsChecked = true; _preview.Refresh(); ScheduleCommit(); }, 52, "0.#");
+        _ovWhole.Checked += (_, _) => { if (_selectedOverlay is null || _syncing) return; _selectedOverlay.FromSec = null; _selectedOverlay.ToSec = null; _preview.Refresh(); ScheduleCommit(); };
+        _ovRange.Checked += (_, _) => { if (_selectedOverlay is null || _syncing) return; _selectedOverlay.FromSec ??= 0; _selectedOverlay.ToSec ??= 5; SyncOverlayPanel(); _preview.Refresh(); ScheduleCommit(); };
+        _fadeIn = Ui.NumberBox(0, v => { if (_selectedOverlay is null) return; _selectedOverlay.FadeInSec = Math.Max(0, v); ScheduleCommit(); }, 44, "0.#");
+        _fadeOut = Ui.NumberBox(0, v => { if (_selectedOverlay is null) return; _selectedOverlay.FadeOutSec = Math.Max(0, v); ScheduleCommit(); }, 44, "0.#");
 
         _overlayEditor.Children.Add(Ui.Row(Ui.Label(T("Файл"), muted: true), _overlayFileCombo, Ui.SmallButton("…", BrowseOverlayFile, T("Выбрать PNG"))));
         _overlayEditor.Children.Add(Ui.Label(T("Перетащите оверлей мышью, размер меняйте за любую сторону или угол."), muted: true, size: Ui.FontCaption));
         _overlayEditor.Children.Add(_overlaySizeText);
         _overlayEditor.Children.Add(Ui.FormRow(T("Прозрачность"), _opacitySlider, _opacityText, trailingWidth: 44));
         _overlayEditor.Children.Add(Ui.Row(Ui.Label(T("Показ"), muted: true), _ovWhole, _ovRange, _ovFrom, Ui.Label(T("по"), muted: true), _ovTo, Ui.Label(T("сек"), muted: true)));
-        _overlayEditor.Children.Add(Ui.Row(Ui.SmallButton(T("от текущей"), () => { if (_selectedOverlay is null) return; _selectedOverlay.FromSec = Math.Round(OutputTime(), 2); _ovRange.IsChecked = true; SyncOverlayPanel(); _preview.Refresh(); }),
-                                           Ui.SmallButton(T("до текущей"), () => { if (_selectedOverlay is null) return; _selectedOverlay.ToSec = Math.Round(OutputTime(), 2); _ovRange.IsChecked = true; SyncOverlayPanel(); _preview.Refresh(); }),
+        _overlayEditor.Children.Add(Ui.Row(Ui.SmallButton(T("от текущей"), () => { if (_selectedOverlay is null) return; _selectedOverlay.FromSec = Math.Round(OutputTime(), 2); _ovRange.IsChecked = true; SyncOverlayPanel(); _preview.Refresh(); ScheduleCommit(); }),
+                                           Ui.SmallButton(T("до текущей"), () => { if (_selectedOverlay is null) return; _selectedOverlay.ToSec = Math.Round(OutputTime(), 2); _ovRange.IsChecked = true; SyncOverlayPanel(); _preview.Refresh(); ScheduleCommit(); }),
                                            Ui.Label(T("Плавно:"), muted: true), _fadeIn, _fadeOut, Ui.Label(T("сек"), muted: true)));
         _overlayEditor.Children.Add(Ui.Row(
             Ui.SmallButton(T("Сохранить как пресет"), SaveOverlayPreset),
@@ -219,6 +220,7 @@ public sealed partial class MainWindow
         LoadOverlayImage(ItemOf(_selectedOverlay));
         SyncOverlayPanel();
         _preview.Refresh();
+        ScheduleCommit();
     }
 
     private IEnumerable<string> OverlayLibraryFiles()
@@ -349,7 +351,7 @@ public sealed partial class MainWindow
         col.Children.Add(filtersHint);
         col.Children.Add(Ui.Row(
             Ui.SmallButton(T("Сбросить"), () => { if (_current is null) return; _current.Filters = new VideoFilters(); SyncFiltersPanel(); _preview.SetFilters(_current.Filters); RefreshFilteredFrameIfPaused(); ScheduleCommit(); }),
-            Ui.SmallButton(T("Ко всем роликам"), () => { if (_current is null) return; foreach (var c in _clips) if (!ReferenceEquals(c, _current)) c.Filters = _current.Filters.Clone(); _statusInfo.Text = T("Фильтры применены ко всем роликам"); })));
+            Ui.SmallButton(T("Ко всем роликам"), () => { if (_current is null) return; foreach (var c in _clips) if (!ReferenceEquals(c, _current)) c.Filters = _current.Filters.Clone(); _statusInfo.Text = T("Фильтры применены ко всем роликам"); RefreshClipList(); CommitNow(); })));
         return Ui.Card(col);
     }
 
@@ -609,6 +611,7 @@ public sealed partial class MainWindow
     private void UpdateTimelineMarkers()
     {
         ScheduleCommit();
+        if (_timeline.IsDragging) return; // во время перетаскивания границы маркеры не пересоздаём
         _timeline.Markers.Clear();
         if (_current is not null)
         {

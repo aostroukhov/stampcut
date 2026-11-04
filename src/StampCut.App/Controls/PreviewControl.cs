@@ -292,7 +292,7 @@ public sealed class PreviewControl : Grid
             var region = rd;
             var fill = new Rectangle
             {
-                Fill = new VisualBrush(Player) { ViewboxUnits = BrushMappingMode.RelativeToBoundingBox, Stretch = Stretch.Fill },
+                Fill = new VisualBrush(_media) { ViewboxUnits = BrushMappingMode.RelativeToBoundingBox, Stretch = Stretch.Fill },
                 Effect = new BlurEffect { Radius = 10, KernelType = KernelType.Box },
                 IsHitTestVisible = false,
             };

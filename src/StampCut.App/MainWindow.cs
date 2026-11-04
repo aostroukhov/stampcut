@@ -110,6 +110,7 @@ public sealed partial class MainWindow : Window
             _autosaveTimer.Stop();
             _exportCts?.Cancel();
             _proxyCts?.Cancel();
+            _waveformCts?.Cancel();
             _s.Settings.WindowMaximized = WindowState == WindowState.Maximized;
             if (WindowState == WindowState.Normal) { _s.Settings.WindowWidth = Width; _s.Settings.WindowHeight = Height; }
             try { _s.Settings.Save(); } catch { }
@@ -257,10 +258,11 @@ public sealed partial class MainWindow : Window
         _timeline.MarkerEdgeChanged += (m, isFrom, t) =>
         {
             t = Math.Round(t, 2);
+            var live = _timeline.Markers.FirstOrDefault(x => ReferenceEquals(x.Tag, m.Tag)) ?? m;
             switch (m.Tag)
             {
-                case AudioCensor c: if (isFrom) c.FromSec = t; else c.ToSec = t; m.From = c.FromSec; m.To = c.ToSec; break;
-                case RedactRegion r: if (isFrom) r.FromSec = t; else r.ToSec = t; m.From = r.FromSec ?? 0; m.To = r.ToSec ?? (_current?.Media.DurationSec ?? 0); break;
+                case AudioCensor c: if (isFrom) c.FromSec = t; else c.ToSec = t; live.From = m.From = c.FromSec; live.To = m.To = c.ToSec; break;
+                case RedactRegion r: if (isFrom) r.FromSec = t; else r.ToSec = t; live.From = m.From = r.FromSec ?? 0; live.To = m.To = r.ToSec ?? (_current?.Media.DurationSec ?? 0); break;
             }
             _timeline.InvalidateVisual();
             _preview.Layout();
@@ -494,7 +496,7 @@ public sealed partial class MainWindow : Window
         RefreshClipList();
         SyncOverlayPanel();
         UpdateExportInfo();
-        if (_clips.Count > 0) SelectClip(_clips[0]);
+        if (_clips.Count > 0) SelectClip(_clips[0]); else ClearPreview();
         if (result.Warnings.Count > 0) ShowInfo(string.Join(" ", result.Warnings), InfoKind.Warning);
         else _statusInfo.Text = $"{T("Проект открыт")}: {Path.GetFileName(path)}";
     }

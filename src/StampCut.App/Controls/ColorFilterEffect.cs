@@ -53,7 +53,8 @@ public sealed class ColorFilterEffect : ShaderEffect
         """;
 
     private static readonly Lazy<PixelShader?> Shader = new(Compile);
-    public static bool Available => Shader.Value is not null;
+    /// <summary>Шейдер скомпилирован и видеокарта (не удалённый рабочий стол, не базовый адаптер) умеет ps_3_0 — иначе WPF просто не нарисует элемент.</summary>
+    public static bool Available => Shader.Value is not null && RenderCapability.IsPixelShaderVersionSupported(3, 0);
 
     public static readonly DependencyProperty InputProperty = RegisterPixelShaderSamplerProperty("Input", typeof(ColorFilterEffect), 0);
     public static readonly DependencyProperty ShadowsProperty = DependencyProperty.Register("Shadows", typeof(double), typeof(ColorFilterEffect), new UIPropertyMetadata(0.0, PixelShaderConstantCallback(0)));
@@ -119,8 +120,8 @@ public sealed class ColorFilterEffect : ShaderEffect
     [ComImport, Guid("8BA5FB08-5195-40e2-AC58-0D989C3A0102"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     private interface ID3DBlob
     {
-        IntPtr GetBufferPointer();
-        nuint GetBufferSize();
+        [PreserveSig] IntPtr GetBufferPointer();
+        [PreserveSig] nuint GetBufferSize();
     }
 
     [DllImport("d3dcompiler_47.dll", CharSet = CharSet.Ansi, ExactSpelling = true)]
