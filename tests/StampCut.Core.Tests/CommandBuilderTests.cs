@@ -308,3 +308,48 @@ public class ImageTests
         Assert.Contains("фото", m.Summary());
     }
 }
+
+public class MotionTests
+{
+    [Fact]
+    public void Interpolates_Clamped()
+    {
+        var keys = new List<MotionKey> { new() { TimeSec = 2, X = 0.1, Y = 0.1 }, new() { TimeSec = 4, X = 0.5, Y = 0.3 } };
+        Assert.Equal((0.1, 0.1), Motion.At(keys, 0, 0, 0));
+        Assert.Equal((0.5, 0.3), Motion.At(keys, 9, 0, 0));
+        var mid = Motion.At(keys, 3, 0, 0);
+        Assert.Equal(0.3, mid.X, 6); Assert.Equal(0.2, mid.Y, 6);
+        Assert.Equal((0.7, 0.7), Motion.At(new List<MotionKey>(), 1, 0.7, 0.7));
+    }
+
+    [Fact]
+    public void Expr_IsPiecewiseLinear_WithTimeShift()
+    {
+        var keys = new List<MotionKey> { new() { TimeSec = 12, X = 0.1 }, new() { TimeSec = 14, X = 0.5 } };
+        var e = Motion.Expr(keys, k => k.X, t0: 10, scale: 1000, max: 800);
+        Assert.Equal("min(max(if(lt(t,4),100+(400)*clip((t-(2))/2,0,1),500),0),800)", e);
+    }
+
+    [Fact]
+    public void MovingRedaction_AndOverlay_UseExpressions()
+    {
+        var clip = Clip.FromMedia(TestData.Media());
+        var r = new RedactRegion { X = 0.1, Y = 0.1, W = 0.1, H = 0.1 };
+        r.Motion.Add(new MotionKey { TimeSec = 0, X = 0.1, Y = 0.1 }); r.Motion.Add(new MotionKey { TimeSec = 5, X = 0.6, Y = 0.5 });
+        clip.Redactions.Add(r);
+        var job = TestData.Job(TestData.Telegram(), clip);
+        var o = new OverlaySettings { Width = 10 };
+        o.Motion.Add(new MotionKey { TimeSec = 0, X = 0, Y = 0 }); o.Motion.Add(new MotionKey { TimeSec = 3, X = 0.8, Y = 0.8 });
+        job.Overlays.Add(new ResolvedOverlay { Settings = o, Path = "C:/o/l.png", Width = 100, Height = 100 });
+        var g = TestData.Graph(job);
+        Assert.Contains("crop=192:108:'min(max(if(lt(t,5),192+(960)*clip((t-(0))/5,0,1),1152),0),1728)':'min(max(if(lt(t,5),108+(432)*clip((t-(0))/5,0,1),540),0),972)'", g);
+        Assert.Contains("overlay=x='min(max(if(lt(t,3),0+(1536)*clip((t-(0))/3,0,1),1536),0),1728)'", g);
+    }
+
+    [Fact]
+    public void Loudness_FromJob()
+    {
+        var job = new ExportJob { Clips = { Clip.FromMedia(TestData.Media()) }, Preset = TestData.Telegram(), OutputPath = "o.mp4", Encoder = HardwareEncoder.None, NormalizeLoudness = true };
+        Assert.Contains("loudnorm=I=-16:TP=-1.5:LRA=11", FFmpegCommandBuilder.Build(job).FilterGraph);
+    }
+}

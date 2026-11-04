@@ -441,7 +441,7 @@ public sealed partial class MainWindow : Window
         }
         try
         {
-            Core.Presets.ProjectStore.Save(path, _clips, _overlays.Select(o => o.Settings), _preset.Id);
+            Core.Presets.ProjectStore.Save(path, _clips, _overlays.Select(o => o.Settings), _preset.Id, _normalizeLoudness);
             DeleteAutosave(_projectPath);
             _projectPath = path;
             _history.MarkSaved();
@@ -498,6 +498,7 @@ public sealed partial class MainWindow : Window
         _preview.Overlays.Clear(); _preview.Overlays.AddRange(_overlays);
         _preview.SelectedOverlay = _selectedOverlay;
         if (_exportPresets.FirstOrDefault(p => p.Id == result.ExportPresetId) is { } preset) { _preset = preset; RefreshPresetCombos(); }
+        SetLoudness(result.NormalizeLoudness);
         _projectPath = asAutosaveOf is null ? path : (asAutosaveOf.Length == 0 ? null : asAutosaveOf);
         if (_projectPath is not null) { AppSettings.Touch(_s.Settings.RecentFiles, _projectPath); AppSettings.Touch(_s.Settings.RecentOpenDirs, Path.GetDirectoryName(_projectPath)); }
         _history.Reset(Snapshot(), saved: asAutosaveOf is null);
@@ -545,6 +546,7 @@ public sealed partial class MainWindow : Window
         _overlays.Clear(); _selectedOverlay = null;
         _preview.Overlays.Clear(); _preview.SelectedOverlay = null;
         _projectPath = null;
+        SetLoudness(false);
         HideInfo();
         RefreshClipList(); SyncOverlayPanel(); SyncRedactPanel(); SyncCensorPanel(); UpdateExportInfo();
         ClearPreview();

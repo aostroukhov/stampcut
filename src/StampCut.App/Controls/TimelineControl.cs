@@ -16,6 +16,8 @@ public sealed class TimelineMarker
     public required Brush Brush { get; init; }
     public int Lane { get; init; }
     public string Label { get; init; } = "";
+    /// <summary>Моменты ключевых точек движения — рисуются ромбиками на полосе.</summary>
+    public List<double> KeyTimes { get; init; } = new();
 }
 
 /// <summary>
@@ -211,6 +213,14 @@ public sealed class TimelineControl : FrameworkElement
             if (x2 <= x1) continue;
             bool sel = ReferenceEquals(m.Tag, SelectedMarkerTag);
             dc.DrawRectangle(m.Brush, sel ? new Pen(Brushes.White, 1) : null, new Rect(x1, y - (sel ? 1 : 0), x2 - x1, LaneH + (sel ? 2 : 0)));
+            foreach (var kt in m.KeyTimes)
+            {
+                if (kt < ViewStart || kt > ViewStart + View) continue;
+                double kx = X(kt), ky = y + LaneH / 2;
+                var d = new StreamGeometry();
+                using (var g = d.Open()) { g.BeginFigure(new Point(kx, ky - 5), true, true); g.LineTo(new Point(kx + 4, ky), true, false); g.LineTo(new Point(kx, ky + 5), true, false); g.LineTo(new Point(kx - 4, ky), true, false); }
+                dc.DrawGeometry(Brushes.White, new Pen(m.Brush, 1), d);
+            }
         }
 
         // маркеры фрагментов

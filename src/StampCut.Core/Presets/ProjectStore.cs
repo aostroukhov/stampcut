@@ -13,6 +13,7 @@ public sealed class ProjectFile
     public string App { get; set; } = "StampCut";
     public DateTime SavedAtUtc { get; set; }
     public string ExportPresetId { get; set; } = "";
+    public bool NormalizeLoudness { get; set; }
     public List<ClipEntry> Clips { get; set; } = new();
     public List<OverlayPresetFile> Overlays { get; set; } = new();
 
@@ -34,7 +35,9 @@ public sealed class ProjectFile
         public double X { get; set; } public double Y { get; set; } public double W { get; set; } public double H { get; set; }
         public string Mode { get; set; } = "blur"; public int BlockSize { get; set; } public int BlurRadius { get; set; }
         public double? From { get; set; } public double? To { get; set; }
+        public List<MotionEntry>? Motion { get; set; }
     }
+    public sealed class MotionEntry { public double T { get; set; } public double X { get; set; } public double Y { get; set; } }
     public sealed class CensorEntry { public double From { get; set; } public double To { get; set; } public string Mode { get; set; } = "beep"; }
 }
 
@@ -43,6 +46,7 @@ public sealed class ProjectLoadResult
     public List<Clip> Clips { get; } = new();
     public List<OverlaySettings> Overlays { get; } = new();
     public string ExportPresetId { get; set; } = "";
+    public bool NormalizeLoudness { get; set; }
     public List<string> Warnings { get; } = new();
 }
 
@@ -56,9 +60,9 @@ public static class ProjectStore
 
     public static bool IsProjectFile(string path) => path.EndsWith(ProjectFile.Extension, StringComparison.OrdinalIgnoreCase);
 
-    public static void Save(string path, IEnumerable<Clip> clips, IEnumerable<OverlaySettings> overlays, string exportPresetId)
+    public static void Save(string path, IEnumerable<Clip> clips, IEnumerable<OverlaySettings> overlays, string exportPresetId, bool normalizeLoudness = false)
     {
-        var pf = ToFile(clips, overlays, exportPresetId);
+        var pf = ToFile(clips, overlays, exportPresetId, normalizeLoudness);
         var tmp = path + ".tmp";
         File.WriteAllText(tmp, JsonSerializer.Serialize(pf, Json));
         File.Move(tmp, path, overwrite: true);
@@ -67,16 +71,17 @@ public static class ProjectStore
     public static string Serialize(ProjectFile pf) => JsonSerializer.Serialize(pf, Json);
 
     /// <summary>Снимок состояния проекта (для истории изменений и проверки «есть несохранённое»).</summary>
-    public static ProjectFile ToFile(IEnumerable<Clip> clips, IEnumerable<OverlaySettings> overlays, string exportPresetId)
+    public static ProjectFile ToFile(IEnumerable<Clip> clips, IEnumerable<OverlaySettings> overlays, string exportPresetId, bool normalizeLoudness = false)
     {
-        var pf = new ProjectFile { ExportPresetId = exportPresetId };
+        var pf = new ProjectFile { ExportPresetId = exportPresetId, NormalizeLoudness = normalizeLoudness };
         foreach (var c in clips)
         {
             var e = new ProjectFile.ClipEntry { Path = c.Media.Path, AudioGainDb = c.AudioGainDb };
             if (!c.Filters.IsDefault) e.Filters = new ProjectFile.FiltersEntry { Shadows = c.Filters.Shadows, Highlights = c.Filters.Highlights, Saturation = c.Filters.Saturation, Brightness = c.Filters.Brightness, Contrast = c.Filters.Contrast };
             foreach (var s in c.Segments) e.Segments.Add(new ProjectFile.SegmentEntry { In = s.InSec, Out = s.OutSec });
             if (c.Crop is { IsFull: false } cr) e.Crop = new ProjectFile.CropEntry { X = cr.X, Y = cr.Y, W = cr.W, H = cr.H };
-            foreach (var r in c.Redactions) e.Redactions.Add(new ProjectFile.RedactEntry { X = r.X, Y = r.Y, W = r.W, H = r.H, Mode = r.Mode == RedactMode.Pixelate ? "pixelate" : "blur", BlockSize = r.BlockSize, BlurRadius = r.BlurRadius, From = r.FromSec, To = r.ToSec });
+            foreach (var r in c.Redactions) e.Redactions.Add(new ProjectFile.RedactEntry { X = r.X, Y = r.Y, W = r.W, H = r.H, Mode = r.Mode == RedactMode.Pixelate ? "pixelate" : "blur", BlockSize = r.BlockSize, BlurRadius = r.BlurRadius, From = r.FromSec, To = r.ToSec,
+                Motion = r.Motion.Count == 0 ? null : r.Motion.Select(k => new ProjectFile.MotionEntry { T = k.TimeSec, X = k.X, Y = k.Y }).ToList() });
             foreach (var x in c.Censors) e.Censors.Add(new ProjectFile.CensorEntry { From = x.FromSec, To = x.ToSec, Mode = x.Mode == CensorMode.Mute ? "mute" : "beep" });
             pf.Clips.Add(e);
         }
@@ -87,7 +92,7 @@ public static class ProjectStore
     /// <summary>Восстановление из снимка: медиа берутся из кэша (без ffprobe).</summary>
     public static ProjectLoadResult FromFile(ProjectFile pf, Func<string, MediaInfo?> media)
     {
-        var result = new ProjectLoadResult { ExportPresetId = pf.ExportPresetId };
+        var result = new ProjectLoadResult { ExportPresetId = pf.ExportPresetId, NormalizeLoudness = pf.NormalizeLoudness };
         foreach (var e in pf.Clips)
         {
             var m = media(e.Path);
@@ -112,7 +117,9 @@ public static class ProjectStore
         foreach (var r in e.Redactions)
         {
             double w = Math.Clamp(r.W, 0.01, 1), h = Math.Clamp(r.H, 0.01, 1);
-            clip.Redactions.Add(new RedactRegion { X = Math.Clamp(r.X, 0, 1 - w), Y = Math.Clamp(r.Y, 0, 1 - h), W = w, H = h, Mode = r.Mode == "pixelate" ? RedactMode.Pixelate : RedactMode.Blur, BlockSize = Math.Max(0, r.BlockSize), BlurRadius = Math.Max(0, r.BlurRadius), FromSec = r.From, ToSec = r.To });
+            var region = new RedactRegion { X = Math.Clamp(r.X, 0, 1 - w), Y = Math.Clamp(r.Y, 0, 1 - h), W = w, H = h, Mode = r.Mode == "pixelate" ? RedactMode.Pixelate : RedactMode.Blur, BlockSize = Math.Max(0, r.BlockSize), BlurRadius = Math.Max(0, r.BlurRadius), FromSec = r.From, ToSec = r.To };
+            if (r.Motion is not null) foreach (var k in r.Motion.OrderBy(k => k.T)) region.Motion.Add(new MotionKey { TimeSec = k.T, X = Math.Clamp(k.X, 0, 1 - w), Y = Math.Clamp(k.Y, 0, 1 - h) });
+            clip.Redactions.Add(region);
         }
         foreach (var x in e.Censors)
             clip.Censors.Add(new AudioCensor { FromSec = x.From, ToSec = x.To, Mode = x.Mode == "mute" ? CensorMode.Mute : CensorMode.Beep });
@@ -124,7 +131,7 @@ public static class ProjectStore
     public static async Task<ProjectLoadResult> LoadAsync(string path, MediaProbe probe, CancellationToken ct = default)
     {
         var pf = Parse(await File.ReadAllTextAsync(path, ct));
-        var result = new ProjectLoadResult { ExportPresetId = pf.ExportPresetId };
+        var result = new ProjectLoadResult { ExportPresetId = pf.ExportPresetId, NormalizeLoudness = pf.NormalizeLoudness };
         var projectDir = Path.GetDirectoryName(path) ?? "";
         foreach (var e in pf.Clips)
         {

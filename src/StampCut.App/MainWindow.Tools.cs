@@ -45,6 +45,8 @@ public sealed partial class MainWindow
     private RadioButton _rdWhole = new(), _rdRange = new();
     private TextBox _rdFrom = new(), _rdTo = new();
     private readonly TextBlock _redactText = Ui.Label("", muted: true, size: Ui.FontCaption);
+    private readonly TextBlock _redactMotionText = Ui.Label("", muted: true, size: Ui.FontCaption);
+    private readonly TextBlock _overlayMotionText = Ui.Label("", muted: true, size: Ui.FontCaption);
 
     // --- запикать
     private readonly ListBox _censorList = new() { MaxHeight = 90, Margin = new Thickness(0, 4, 0, 4) };
@@ -111,6 +113,26 @@ public sealed partial class MainWindow
         _overlayEditor.Children.Add(Ui.Row(Ui.SmallButton(T("от текущей"), () => { if (_selectedOverlay is null) return; _selectedOverlay.FromSec = Math.Round(OutputTime(), 2); _ovRange.IsChecked = true; SyncOverlayPanel(); _preview.Refresh(); ScheduleCommit(); }),
                                            Ui.SmallButton(T("до текущей"), () => { if (_selectedOverlay is null) return; _selectedOverlay.ToSec = Math.Round(OutputTime(), 2); _ovRange.IsChecked = true; SyncOverlayPanel(); _preview.Refresh(); ScheduleCommit(); }),
                                            Ui.Label(T("Плавно:"), muted: true), _fadeIn, _fadeOut, Ui.Label(T("сек"), muted: true)));
+        _overlayEditor.Children.Add(Ui.Row(Ui.Label(T("Движение"), muted: true),
+            Ui.SmallButton(T("⬥ Точка здесь"), () =>
+            {
+                if (_selectedOverlay is null) return;
+                var item = ItemOf(_selectedOverlay);
+                var r = Core.Geometry.OverlayGeometry.Compute(_preview.OutputWidth, _preview.OutputHeight, _selectedOverlay, item.PngWidth, item.PngHeight);
+                var (x, y) = _selectedOverlay.Motion.Count == 0 ? ((double)r.X / _preview.OutputWidth, (double)r.Y / _preview.OutputHeight)
+                    : Core.Models.Motion.At(_selectedOverlay.Motion, OutputTime(), (double)r.X / _preview.OutputWidth, (double)r.Y / _preview.OutputHeight);
+                Core.Models.Motion.Upsert(_selectedOverlay.Motion, Math.Round(OutputTime(), 2), x, y);
+                SyncOverlayPanel(); _preview.Layout(); ScheduleCommit();
+            }, T("Запомнить положение оверлея в этот момент; между точками он движется по прямой")),
+            Ui.SmallButton(T("− Точка"), () =>
+            {
+                if (_selectedOverlay is null || _selectedOverlay.Motion.Count == 0) return;
+                var near = _selectedOverlay.Motion.OrderBy(k => Math.Abs(k.TimeSec - OutputTime())).First();
+                _selectedOverlay.Motion.Remove(near);
+                SyncOverlayPanel(); _preview.Layout(); ScheduleCommit();
+            }, T("Удалить ближайшую точку")),
+            Ui.SmallButton(T("Без движения"), () => { if (_selectedOverlay is null) return; _selectedOverlay.Motion.Clear(); SyncOverlayPanel(); _preview.Layout(); ScheduleCommit(); }),
+            _overlayMotionText));
         _overlayEditor.Children.Add(Ui.Row(
             Ui.SmallButton(T("Сохранить как пресет"), SaveOverlayPreset),
             Ui.SmallButton(T("По умолчанию"), SetDefaultOverlay, T("Применять этот пресет ко всем новым проектам")),
@@ -280,6 +302,7 @@ public sealed partial class MainWindow
             _ovWhole.IsChecked = !range; _ovRange.IsChecked = range;
             Ui.SetNumber(_ovFrom, o.FromSec ?? 0, "0.#"); Ui.SetNumber(_ovTo, o.ToSec ?? 5, "0.#");
             Ui.SetNumber(_fadeIn, o.FadeInSec, "0.#"); Ui.SetNumber(_fadeOut, o.FadeOutSec, "0.#");
+            _overlayMotionText.Text = o.Motion.Count == 0 ? T("по якорю") : $"{T("точек")}: {o.Motion.Count}";
         }
         finally { _syncing = false; }
     }
@@ -290,6 +313,7 @@ public sealed partial class MainWindow
         var name = InputWindow.Ask(this, T("Пресет оверлея"), T("Название пресета:"), _selectedOverlay.Name);
         if (name is null) return;
         var p = _selectedOverlay.Clone();
+        p.Motion.Clear(); // движение относится к конкретному проекту, не к пресету
         p.Name = name; p.Id = PresetStore.SafeId(name).ToLowerInvariant();
         var resolved = ItemOf(_selectedOverlay).ResolvedPath;
         if (resolved is not null && _s.Presets.OverlayDirs(AppPaths.OverlaysDir).Any(d => string.Equals(Path.GetDirectoryName(resolved), d, StringComparison.OrdinalIgnoreCase)))
@@ -476,6 +500,30 @@ public sealed partial class MainWindow
             Ui.SmallButton(T("от текущей"), () => { if (_selectedRedaction is null) return; _selectedRedaction.FromSec = Math.Round(Position, 2); _selectedRedaction.ToSec ??= _current?.Media.DurationSec; SyncRedactPanel(); UpdateTimelineMarkers(); }),
             Ui.SmallButton(T("до текущей"), () => { if (_selectedRedaction is null) return; _selectedRedaction.ToSec = Math.Round(Position, 2); _selectedRedaction.FromSec ??= 0; SyncRedactPanel(); UpdateTimelineMarkers(); }),
             Ui.SmallButton(T("✕ Удалить область"), RemoveSelectedRedaction)));
+        _redactEditor.Children.Add(Ui.Row(Ui.Label(T("Движение"), muted: true),
+            Ui.SmallButton(T("⬥ Точка здесь"), () =>
+            {
+                if (_selectedRedaction is null) return;
+                var (x, y) = _selectedRedaction.PositionAt(Position);
+                Core.Models.Motion.Upsert(_selectedRedaction.Motion, Math.Round(Position, 2), x, y);
+                SyncRedactPanel(); UpdateTimelineMarkers(); _preview.Layout();
+            }, T("Запомнить положение области в этот момент; между точками область движется по прямой")),
+            Ui.SmallButton(T("− Точка"), () =>
+            {
+                if (_selectedRedaction is null || _selectedRedaction.Motion.Count == 0) return;
+                var near = _selectedRedaction.Motion.OrderBy(k => Math.Abs(k.TimeSec - Position)).First();
+                _selectedRedaction.Motion.Remove(near);
+                if (_selectedRedaction.Motion.Count == 0) { (_selectedRedaction.X, _selectedRedaction.Y) = (near.X, near.Y); }
+                SyncRedactPanel(); UpdateTimelineMarkers(); _preview.Layout();
+            }, T("Удалить ближайшую точку")),
+            Ui.SmallButton(T("Без движения"), () =>
+            {
+                if (_selectedRedaction is null) return;
+                var (x, y) = _selectedRedaction.PositionAt(Position);
+                _selectedRedaction.Motion.Clear(); _selectedRedaction.X = x; _selectedRedaction.Y = y;
+                SyncRedactPanel(); UpdateTimelineMarkers(); _preview.Layout();
+            }),
+            _redactMotionText));
         _redactEditor.Visibility = Visibility.Collapsed;
 
         var content = Ui.Column(
@@ -540,6 +588,7 @@ public sealed partial class MainWindow
             _effectSlider.Maximum = r.Mode == RedactMode.Pixelate ? 200 : 300;
             _effectSlider.Value = r.Mode == RedactMode.Pixelate ? r.BlockSize : r.BlurRadius;
             SyncEffectLabel();
+            _redactMotionText.Text = r.Motion.Count == 0 ? T("неподвижно") : $"{T("точек")}: {r.Motion.Count} ({TimeFormat.Format(r.Motion.Min(k => k.TimeSec), false)}–{TimeFormat.Format(r.Motion.Max(k => k.TimeSec), false)})";
             bool range = r.FromSec is not null || r.ToSec is not null;
             _rdWhole.IsChecked = !range; _rdRange.IsChecked = range;
             Ui.SetNumber(_rdFrom, r.FromSec ?? 0, "0.#"); Ui.SetNumber(_rdTo, r.ToSec ?? _current.Media.DurationSec, "0.#");
@@ -615,8 +664,8 @@ public sealed partial class MainWindow
         _timeline.Markers.Clear();
         if (_current is not null)
         {
-            foreach (var r in _current.Redactions.Where(r => r.FromSec is not null || r.ToSec is not null))
-                _timeline.Markers.Add(new TimelineMarker { Tag = r, From = r.FromSec ?? 0, To = r.ToSec ?? _current.Media.DurationSec, Brush = RedactBrush, Lane = 0 });
+            foreach (var r in _current.Redactions.Where(r => r.FromSec is not null || r.ToSec is not null || r.Motion.Count > 0))
+                _timeline.Markers.Add(new TimelineMarker { Tag = r, From = r.FromSec ?? 0, To = r.ToSec ?? _current.Media.DurationSec, Brush = RedactBrush, Lane = 0, KeyTimes = r.Motion.Select(k => k.TimeSec).ToList() });
             foreach (var c in _current.Censors)
                 _timeline.Markers.Add(new TimelineMarker { Tag = c, From = c.FromSec, To = c.ToSec, Brush = CensorBrush, Lane = 1 });
             _timeline.SelectedMarkerTag = (object?)SelectedCensor ?? _selectedRedaction;

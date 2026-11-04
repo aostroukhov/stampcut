@@ -18,6 +18,8 @@ public sealed partial class MainWindow
     private readonly TextBlock _exportDetails = Ui.Label("", muted: true, size: Ui.FontCaption);
     private Button _exportButton = new();
     private string? _lastExportedFile;
+    private bool _normalizeLoudness;
+    private CheckBox _loudnessCheck = new();
 
     private UIElement BuildExportBlock()
     {
@@ -25,9 +27,11 @@ public sealed partial class MainWindow
         _exportButton = Ui.Button(T("Экспорт"), () => Fire(ExportAsync()), primary: true, tooltip: T("Экспортировать (Ctrl+E)"), minWidth: 120);
         _exportButton.Height = 36; _exportButton.Padding = new Thickness(18, 0, 18, 0);
         var openFolder = Ui.SmallButton(T("Открыть папку"), OpenLastFolder, T("Открыть папку с результатом"));
+        _loudnessCheck = Ui.Check(T("Выровнять громкость (−16 LUFS, как у Telegram/YouTube)"), false, v => { if (_syncing) return; _normalizeLoudness = v; ScheduleCommit(); });
         var col = Ui.Column(
             Ui.Header(T("ЭКСПОРТ")),
             _exportPresetCombo,
+            _loudnessCheck,
             _exportTarget,
             _exportDetails,
             Ui.Row(_exportButton, openFolder));
@@ -139,7 +143,7 @@ public sealed partial class MainWindow
         var job = new ExportJob
         {
             Clips = _clips.ToList(), Overlays = resolved, Preset = _preset, OutputPath = outputPath,
-            Encoder = encoder, HwAccel = _preset.StreamCopy ? "" : _s.ResolveHwAccel(encoder),
+            Encoder = encoder, HwAccel = _preset.StreamCopy ? "" : _s.ResolveHwAccel(encoder), NormalizeLoudness = _normalizeLoudness,
         };
         var errors = FFmpegCommandBuilder.Validate(job);
         if (errors.Count > 0) { ShowInfo(string.Join(" ", errors), InfoKind.Error); _statusInfo.Text = ""; return; }

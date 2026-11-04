@@ -107,6 +107,72 @@ public sealed class CropRect
     }
 }
 
+/// <summary>Ключевая точка движения: в момент TimeSec левый верхний угол находится в (X, Y) — доли кадра.</summary>
+public sealed class MotionKey
+{
+    public double TimeSec { get; set; }
+    public double X { get; set; }
+    public double Y { get; set; }
+    public MotionKey Clone() => new() { TimeSec = TimeSec, X = X, Y = Y };
+}
+
+public static class Motion
+{
+    /// <summary>Положение в момент t: до первой точки — первая, после последней — последняя, между — линейно.</summary>
+    public static (double X, double Y) At(IReadOnlyList<MotionKey> keys, double t, double baseX, double baseY)
+    {
+        if (keys.Count == 0) return (baseX, baseY);
+        var k = keys.OrderBy(x => x.TimeSec).ToList();
+        if (t <= k[0].TimeSec) return (k[0].X, k[0].Y);
+        for (int i = 1; i < k.Count; i++)
+        {
+            if (t <= k[i].TimeSec)
+            {
+                double span = k[i].TimeSec - k[i - 1].TimeSec;
+                double f = span <= 1e-9 ? 1 : (t - k[i - 1].TimeSec) / span;
+                return (k[i - 1].X + (k[i].X - k[i - 1].X) * f, k[i - 1].Y + (k[i].Y - k[i - 1].Y) * f);
+            }
+        }
+        return (k[^1].X, k[^1].Y);
+    }
+
+    /// <summary>Поставить точку в момент t (обновить ближайшую в пределах tolerance).</summary>
+    public static void Upsert(List<MotionKey> keys, double t, double x, double y, double tolerance = 0.25)
+    {
+        var near = keys.FirstOrDefault(k => Math.Abs(k.TimeSec - t) <= tolerance);
+        if (near is not null) { near.X = x; near.Y = y; return; }
+        keys.Add(new MotionKey { TimeSec = t, X = x, Y = y });
+        keys.Sort((a, b) => a.TimeSec.CompareTo(b.TimeSec));
+    }
+
+    /// <summary>Выражение ffmpeg для координаты (в пикселях): кусочно-линейно по t; t0 — сдвиг времени (начало фрагмента), scale — размер кадра, max — предел.</summary>
+    public static string Expr(IReadOnlyList<MotionKey> keys, Func<MotionKey, double> coord, double t0, double scale, double max)
+    {
+        var k = keys.OrderBy(x => x.TimeSec).ToList();
+        string N(double v) => TimeFormat.Num(v);
+        string body;
+        if (k.Count == 1) body = N(coord(k[0]) * scale);
+        else
+        {
+            // if(lt(t,T1), A0+(A1-A0)*(t-T0)/(T1-T0), if(lt(t,T2), ..., A_last))
+            var sb = new System.Text.StringBuilder();
+            int depth = 0;
+            for (int i = 1; i < k.Count; i++)
+            {
+                double tA = k[i - 1].TimeSec - t0, tB = k[i].TimeSec - t0;
+                double a = coord(k[i - 1]) * scale, b = coord(k[i]) * scale;
+                double span = Math.Max(1e-6, tB - tA);
+                sb.Append($"if(lt(t,{N(tB)}),{N(a)}+({N(b - a)})*clip((t-({N(tA)}))/{N(span)},0,1),");
+                depth++;
+            }
+            sb.Append(N(coord(k[^1]) * scale));
+            sb.Append(')', depth);
+            body = sb.ToString();
+        }
+        return $"min(max({body},0),{N(max)})";
+    }
+}
+
 public enum RedactMode { Blur, Pixelate }
 
 /// <summary>Область ретуши (лицо, номер, недопустимый контент): прямоугольник в долях кадра исходника, режим, параметры, интервал в секундах исходника.</summary>
@@ -124,14 +190,20 @@ public sealed class RedactRegion
     /// <summary>Интервал показа в секундах исходника; null — весь ролик.</summary>
     public double? FromSec { get; set; }
     public double? ToSec { get; set; }
+    /// <summary>Движение: ключевые точки (время исходника → левый верхний угол в долях кадра). Пусто — область неподвижна (X, Y).</summary>
+    public List<MotionKey> Motion { get; } = new();
+
+    public (double X, double Y) PositionAt(double t) => Motion.Count == 0 ? (X, Y) : Core.Models.Motion.At(Motion, t, X, Y);
 
     public int EffectiveBlockSize(int frameH) => BlockSize > 0 ? BlockSize : Math.Max(4, frameH / 45);
     public int EffectiveBlurRadius(int regionW, int regionH) => BlurRadius > 0 ? BlurRadius : Math.Max(2, Math.Min(regionW, regionH) / 4);
 
-    public RedactRegion Clone() => new()
+    public RedactRegion Clone()
     {
-        X = X, Y = Y, W = W, H = H, Mode = Mode, BlockSize = BlockSize, BlurRadius = BlurRadius, FromSec = FromSec, ToSec = ToSec
-    };
+        var c = new RedactRegion { X = X, Y = Y, W = W, H = H, Mode = Mode, BlockSize = BlockSize, BlurRadius = BlurRadius, FromSec = FromSec, ToSec = ToSec };
+        c.Motion.AddRange(Motion.Select(k => k.Clone()));
+        return c;
+    }
 }
 
 /// <summary>Базовая коррекция картинки ролика. Все значения — проценты от −100 до 100, 0 — без изменений (насыщенность: 100 — без изменений).</summary>

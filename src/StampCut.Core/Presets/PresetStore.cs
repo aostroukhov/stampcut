@@ -102,6 +102,8 @@ public sealed class PresetStore
         yield return localOverlaysDir;
         if (_libraryDir is not null) yield return Path.Combine(_libraryDir, "overlays");
         if (_libraryDir is not null) yield return _libraryDir;
+        // оверлеи из комплекта программы (папка overlays рядом с exe)
+        yield return Path.Combine(AppContext.BaseDirectory, "overlays");
     }
 
     public string? ResolveOverlayFile(string file, string localOverlaysDir)
@@ -270,12 +272,20 @@ public sealed class OverlayPresetFile
     public TimeRangeSection? TimeRange { get; set; }
     public double? FadeInSec { get; set; }
     public double? FadeOutSec { get; set; }
+    public List<ProjectFile.MotionEntry>? Motion { get; set; }
 
     public sealed class OffsetSection { public double X { get; set; } public double Y { get; set; } public string? Unit { get; set; } }
     public sealed class SizeSection { public double Width { get; set; } public string? Unit { get; set; } }
     public sealed class TimeRangeSection { public double FromSec { get; set; } public double ToSec { get; set; } }
 
-    public OverlaySettings ToModel(string fallbackId) => new()
+    public OverlaySettings ToModel(string fallbackId)
+    {
+        var o = ToModelCore(fallbackId);
+        if (Motion is not null) foreach (var k in Motion.OrderBy(k => k.T)) o.Motion.Add(new MotionKey { TimeSec = k.T, X = k.X, Y = k.Y });
+        return o;
+    }
+
+    private OverlaySettings ToModelCore(string fallbackId) => new()
     {
         Id = string.IsNullOrWhiteSpace(Id) ? fallbackId : Id!,
         Name = string.IsNullOrWhiteSpace(Name) ? fallbackId : Name!,
@@ -298,6 +308,7 @@ public sealed class OverlayPresetFile
         Opacity = o.Opacity,
         TimeRange = o.FromSec is not null || o.ToSec is not null ? new TimeRangeSection { FromSec = o.FromSec ?? 0, ToSec = o.ToSec ?? 0 } : null,
         FadeInSec = o.FadeInSec, FadeOutSec = o.FadeOutSec,
+        Motion = o.Motion.Count == 0 ? null : o.Motion.Select(k => new ProjectFile.MotionEntry { T = k.TimeSec, X = k.X, Y = k.Y }).ToList(),
     };
 
     public static Anchor ParseAnchor(string? s) => s?.ToLowerInvariant().Replace("_", "-") switch

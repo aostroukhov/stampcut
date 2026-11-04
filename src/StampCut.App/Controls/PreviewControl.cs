@@ -212,7 +212,17 @@ public sealed class PreviewControl : Grid
                 handles.Add((t, dx, dy));
             }
 
-            Rect RectOut() => RectToRect(OverlayGeometry.Compute(OutputWidth, OutputHeight, s, item.PngWidth, item.PngHeight));
+            Rect RectOut()
+            {
+                var r = RectToRect(OverlayGeometry.Compute(OutputWidth, OutputHeight, s, item.PngWidth, item.PngHeight));
+                if (s.Motion.Count > 0)
+                {
+                    var (mx, my) = Motion.At(s.Motion, OutputTimeSec, r.X / OutputWidth, r.Y / OutputHeight);
+                    r.X = Math.Max(0, Math.Min(OutputWidth - r.Width, mx * OutputWidth));
+                    r.Y = Math.Max(0, Math.Min(OutputHeight - r.Height, my * OutputHeight));
+                }
+                return r;
+            }
             double K() => OutputFramePx().Width / Math.Max(1, OutputWidth); // px исходника на 1 px выхода
             void Apply(double x, double y, double w)
             {
@@ -222,6 +232,14 @@ public sealed class PreviewControl : Grid
                 if (h > OutputHeight) { h = OutputHeight; w = h / aspect; }
                 x = Math.Max(0, Math.Min(OutputWidth - w, x));
                 y = Math.Max(0, Math.Min(OutputHeight - h, y));
+                if (s.Motion.Count > 0)
+                {
+                    // есть движение: перетаскивание правит точку в текущий момент (или ставит новую)
+                    Motion.Upsert(s.Motion, Math.Round(OutputTimeSec, 2), x / OutputWidth, y / OutputHeight);
+                    if (s.WidthUnit == SizeUnit.PercentOfVideoWidth) s.Width = Math.Clamp(w / OutputWidth * 100.0, 1, 100); else s.Width = w;
+                    OverlayChanged?.Invoke(s); Layout();
+                    return;
+                }
                 // якорь — ближайший угол: центральные якоря игнорируют смещение и «запирают» оверлей по оси
                 int col = x + w / 2 < OutputWidth / 2.0 ? 0 : 2, row = y + h / 2 < OutputHeight / 2.0 ? 0 : 2;
                 s.Anchor = (Anchor)(row * 3 + col);
@@ -302,7 +320,17 @@ public sealed class PreviewControl : Grid
             var resize = Ui.Handle(11, Cursors.SizeNWSE, Brushes.Yellow);
             _layer.Children.Add(fill); _layer.Children.Add(border); _layer.Children.Add(label); _layer.Children.Add(move); _layer.Children.Add(resize);
 
-            Rect Px() => new(region.X * VideoWidth, region.Y * VideoHeight, region.W * VideoWidth, region.H * VideoHeight);
+            Rect Px()
+            {
+                var (rx, ry) = region.PositionAt(CurrentTimeSec);
+                return new Rect(rx * VideoWidth, ry * VideoHeight, region.W * VideoWidth, region.H * VideoHeight);
+            }
+            void SetPos(double fx, double fy)
+            {
+                fx = Math.Max(0, Math.Min(1 - region.W, fx)); fy = Math.Max(0, Math.Min(1 - region.H, fy));
+                if (region.Motion.Count > 0) Motion.Upsert(region.Motion, Math.Round(CurrentTimeSec, 2), fx, fy);
+                else { region.X = fx; region.Y = fy; }
+            }
             void LayoutItem()
             {
                 var px = Px();
@@ -328,18 +356,20 @@ public sealed class PreviewControl : Grid
             _layouters.Add(LayoutItem);
 
             move.DragStarted += (_, _) => { SelectedRedaction = region; RedactionSelected?.Invoke(region); Layout(); };
+            move.ToolTip = region.Motion.Count > 0 ? $"{region.Motion.Count} ⬥" : null;
             move.DragCompleted += (_, _) => EditCompleted?.Invoke();
             resize.DragCompleted += (_, _) => EditCompleted?.Invoke();
             move.DragDelta += (_, e) =>
             {
-                region.X = Math.Max(0, Math.Min(1 - region.W, region.X + e.HorizontalChange / _scale / VideoWidth));
-                region.Y = Math.Max(0, Math.Min(1 - region.H, region.Y + e.VerticalChange / _scale / VideoHeight));
+                var (cx, cy) = region.PositionAt(CurrentTimeSec);
+                SetPos(cx + e.HorizontalChange / _scale / VideoWidth, cy + e.VerticalChange / _scale / VideoHeight);
                 RedactionChanged?.Invoke(region); Layout();
             };
             resize.DragDelta += (_, e) =>
             {
-                region.W = Math.Max(8.0 / VideoWidth, Math.Min(1 - region.X, region.W + e.HorizontalChange / _scale / VideoWidth));
-                region.H = Math.Max(8.0 / VideoHeight, Math.Min(1 - region.Y, region.H + e.VerticalChange / _scale / VideoHeight));
+                var (cx, cy) = region.PositionAt(CurrentTimeSec);
+                region.W = Math.Max(8.0 / VideoWidth, Math.Min(1 - cx, region.W + e.HorizontalChange / _scale / VideoWidth));
+                region.H = Math.Max(8.0 / VideoHeight, Math.Min(1 - cy, region.H + e.VerticalChange / _scale / VideoHeight));
                 RedactionChanged?.Invoke(region); Layout();
             };
         }

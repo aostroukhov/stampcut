@@ -206,7 +206,7 @@ public static class FFmpegCommandBuilder
             g.Append($"concat=n={n}:v=1:a={(anyAudio ? 1 : 0)}[vc]").Append(anyAudio ? "[ac]" : "").Append(';');
             v = "vc"; au = "ac";
         }
-        if (anyAudio && p.LoudnessNormalize)
+        if (anyAudio && (p.LoudnessNormalize || job.NormalizeLoudness))
         {
             g.Append($"[{au}]loudnorm=I=-16:TP=-1.5:LRA=11[an];");
             au = "an";
@@ -224,7 +224,13 @@ public static class FFmpegCommandBuilder
             if (s.FadeOutSec > 0) ov.Add($"fade=t=out:st={Num(Math.Max(from, to - s.FadeOutSec))}:d={Num(s.FadeOutSec)}:alpha=1");
             g.Append($"[{overlayInputIndex[j]}:v]{string.Join(",", ov)}[ov{j}];");
             string enable = s.FromSec is not null || s.ToSec is not null ? $":enable='between(t,{Num(from)},{Num(to)})'" : "";
-            g.Append($"[{v}][ov{j}]overlay=x={rect.X}:y={rect.Y}:format=auto{enable}[vo{j}];");
+            string ox = rect.X.ToString(), oy = rect.Y.ToString();
+            if (s.Motion.Count > 0)
+            {
+                ox = "'" + Motion.Expr(s.Motion, k => k.X, 0, outW, Math.Max(0, outW - rect.W)) + "'";
+                oy = "'" + Motion.Expr(s.Motion, k => k.Y, 0, outH, Math.Max(0, outH - rect.H)) + "'";
+            }
+            g.Append($"[{v}][ov{j}]overlay=x={ox}:y={oy}:format=auto{enable}[vo{j}];");
             v = $"vo{j}";
         }
         // аппаратные кодеры (NVENC через устройство D3D11, QSV, AMF, MF) принимают NV12; YUV420P — только libx264
@@ -304,9 +310,16 @@ public static class FFmpegCommandBuilder
                 double to = Math.Max(from, (rd.ToSec ?? seg.OutSec) - seg.InSec);
                 enable = $":enable='between(t,{Num(from)},{Num(to)})'";
             }
+            string rx = x.ToString(), ry = y.ToString();
+            if (rd.Motion.Count > 0)
+            {
+                // движущаяся область: положение — выражение от t (время относительно начала фрагмента), размер фиксированный
+                rx = "'" + Motion.Expr(rd.Motion, kk => kk.X, seg.InSec, m.Width, Math.Max(0, m.Width - w)) + "'";
+                ry = "'" + Motion.Expr(rd.Motion, kk => kk.Y, seg.InSec, m.Height, Math.Max(0, m.Height - h)) + "'";
+            }
             g.Append($"[{cur}]split[c{i}_m{k}][c{i}_r{k}];");
-            g.Append($"[c{i}_r{k}]crop={w}:{h}:{x}:{y},{effect}[c{i}_b{k}];");
-            g.Append($"[c{i}_m{k}][c{i}_b{k}]overlay=x={x}:y={y}{enable}[c{i}_{k}];");
+            g.Append($"[c{i}_r{k}]crop={w}:{h}:{rx}:{ry},{effect}[c{i}_b{k}];");
+            g.Append($"[c{i}_m{k}][c{i}_b{k}]overlay=x={rx}:y={ry}{enable}[c{i}_{k}];");
             cur = $"c{i}_{k}";
         }
 

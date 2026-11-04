@@ -76,6 +76,7 @@ jobs:
           Copy-Item tools/ffmpeg/*.exe dist/StampCut/tools/ffmpeg/
           if (Test-Path tools/ffmpeg/LICENSE-ffmpeg.txt) { Copy-Item tools/ffmpeg/LICENSE-ffmpeg.txt dist/StampCut/tools/ffmpeg/ }
           Copy-Item -Recurse presets dist/StampCut/presets-examples
+          Copy-Item -Recurse overlays dist/StampCut/overlays
           Copy-Item README.md dist/StampCut/
           Copy-Item -Recurse docs dist/StampCut/docs
           Compress-Archive -Path dist/StampCut/* -DestinationPath dist/StampCut-portable-win-x64.zip -Force

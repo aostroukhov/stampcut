@@ -21,6 +21,8 @@ public sealed class ExportJob
     public HardwareEncoder Encoder { get; init; } = HardwareEncoder.None;
     /// <summary>Аппаратное декодирование (d3d11va / cuda / vaapi). Пустая строка — программное.</summary>
     public string HwAccel { get; init; } = "";
+    /// <summary>Выровнять громкость результата (EBU R128, −16 LUFS).</summary>
+    public bool NormalizeLoudness { get; init; }
 
     public double TotalDurationSec => Clips.Sum(c => c.DurationSec);
 }

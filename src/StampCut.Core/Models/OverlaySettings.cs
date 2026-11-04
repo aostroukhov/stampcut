@@ -28,11 +28,18 @@ public sealed class OverlaySettings
     public double? ToSec { get; set; }
     public double FadeInSec { get; set; }
     public double FadeOutSec { get; set; }
+    /// <summary>Движение: ключевые точки (время выходной ленты → левый верхний угол в долях выходного кадра). Пусто — положение по якорю.</summary>
+    public List<MotionKey> Motion { get; } = new();
 
-    public OverlaySettings Clone() => new()
+    public OverlaySettings Clone()
     {
-        Id = Id, Name = Name, File = File, Anchor = Anchor, OffsetX = OffsetX, OffsetY = OffsetY, OffsetUnit = OffsetUnit,
-        Width = Width, WidthUnit = WidthUnit, Opacity = Opacity, FromSec = FromSec, ToSec = ToSec,
-        FadeInSec = FadeInSec, FadeOutSec = FadeOutSec
-    };
+        var c = new OverlaySettings
+        {
+            Id = Id, Name = Name, File = File, Anchor = Anchor, OffsetX = OffsetX, OffsetY = OffsetY, OffsetUnit = OffsetUnit,
+            Width = Width, WidthUnit = WidthUnit, Opacity = Opacity, FromSec = FromSec, ToSec = ToSec,
+            FadeInSec = FadeInSec, FadeOutSec = FadeOutSec
+        };
+        c.Motion.AddRange(Motion.Select(k => k.Clone()));
+        return c;
+    }
 }

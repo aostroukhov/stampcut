@@ -1,6 +1,4 @@
-# PNG-оверлеи редакции и тестовые видео в git не кладём
-overlays/*
-!overlays/README.md
+# тестовые видео в git не кладём (оверлеи комплекта — в overlays/)
 *.mp4
 *.mov
 *.MOV
