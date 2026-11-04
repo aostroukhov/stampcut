@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Shell;
 using System.Windows.Threading;
 using StampCut.App.Controls;
 using StampCut.App.Services;
@@ -44,6 +45,7 @@ public sealed partial class MainWindow : Window
     private readonly StackPanel _infoContent = new() { Orientation = Orientation.Horizontal };
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(33) };
     private UIElement _transport = new Grid();
+    private readonly TextBlock _titleText = Ui.Label("StampCut", size: 12);
     private UIElement _toolsStack = new Grid();
     private UIElement _clipButtons = new Grid();
 
@@ -66,6 +68,12 @@ public sealed partial class MainWindow : Window
         AllowDrop = true;
         Ui.ApplyWindowTheme(this);
         try { if (Ui.AppIcon() is { } ico) Icon = ico.Frame; } catch (Exception ex) { Logger.Warn("Иконка: " + ex.Message); }
+        // панель кнопок живёт в строке заголовка: системные кнопки рисует Windows, остальное — наше
+        WindowChrome.SetWindowChrome(this, new WindowChrome
+        {
+            CaptionHeight = 44, GlassFrameThickness = new Thickness(-1), UseAeroCaptionButtons = true,
+            ResizeBorderThickness = new Thickness(6), CornerRadius = new CornerRadius(0),
+        });
 
         _cancelButton = Ui.SmallButton(T("Отмена"), CancelExport);
         _cancelButton.Visibility = Visibility.Collapsed;
@@ -109,17 +117,29 @@ public sealed partial class MainWindow : Window
     {
         var dock = new DockPanel();
 
-        var toolbar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(10, 8, 10, 6) };
-        toolbar.Children.Add(Ui.Button(T("Открыть…"), () => OpenFiles(replace: true), tooltip: T("Открыть видео (Ctrl+O)")));
+        // строка заголовка: иконка, название, кнопки; справа оставляем место под системные кнопки окна
+        var toolbar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(10, 6, 150, 4), Height = 34 };
+        if (Icon is not null) toolbar.Children.Add(new Image { Source = Icon, Width = 18, Height = 18, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center });
+        _titleText.Margin = new Thickness(0, 0, 14, 0);
+        _titleText.FontWeight = FontWeights.SemiBold;
+        toolbar.Children.Add(_titleText);
         var recentButton = Ui.Button(T("Недавние ▾"), () => { }, tooltip: T("Недавние файлы и папки"));
         recentButton.Click += (_, _) => ShowRecentMenu(recentButton);
-        toolbar.Children.Add(recentButton);
-        toolbar.Children.Add(Ui.Button(T("+ Добавить ролик"), () => OpenFiles(replace: false), tooltip: T("Добавить ролик для склейки")));
         var projectButton = Ui.Button(T("Проект ▾"), () => { }, tooltip: T("Сохранить или открыть проект"));
         projectButton.Click += (_, _) => ShowProjectMenu(projectButton);
-        toolbar.Children.Add(projectButton);
-        toolbar.Children.Add(new Separator { Width = 12, Opacity = 0 });
-        toolbar.Children.Add(Ui.Button(T("Настройки"), OpenSettings));
+        foreach (var b in new[]
+        {
+            Ui.Button(T("Открыть…"), () => OpenFiles(replace: true), tooltip: T("Открыть видео (Ctrl+O)")),
+            recentButton,
+            Ui.Button(T("+ Добавить ролик"), () => OpenFiles(replace: false), tooltip: T("Добавить ролик для склейки")),
+            projectButton,
+            Ui.Button(T("Настройки"), OpenSettings),
+        })
+        {
+            b.Height = 30; b.Padding = new Thickness(10, 0, 10, 0);
+            WindowChrome.SetIsHitTestVisibleInChrome(b, true);
+            toolbar.Children.Add(b);
+        }
         DockPanel.SetDock(toolbar, Dock.Top);
         dock.Children.Add(toolbar);
 
@@ -362,7 +382,7 @@ public sealed partial class MainWindow : Window
             _projectPath = path;
             AppSettings.Touch(_s.Settings.RecentFiles, path);
             _statusInfo.Text = $"{T("Проект сохранён")}: {Path.GetFileName(path)}";
-            Title = $"StampCut {AppVersion} — {Path.GetFileName(path)}";
+            SetTitle(Path.GetFileName(path));
         }
         catch (Exception ex)
         {
@@ -400,7 +420,7 @@ public sealed partial class MainWindow : Window
         _projectPath = path;
         AppSettings.Touch(_s.Settings.RecentFiles, path);
         AppSettings.Touch(_s.Settings.RecentOpenDirs, Path.GetDirectoryName(path));
-        Title = $"StampCut {AppVersion} — {Path.GetFileName(path)}";
+        SetTitle(Path.GetFileName(path));
         RefreshClipList();
         SyncOverlayPanel();
         UpdateExportInfo();
@@ -417,6 +437,12 @@ public sealed partial class MainWindow : Window
         if (project is not null) { await OpenProjectAsync(project); list.Remove(project); replace = false; }
         var videos = list.Where(f => IsVideoFile(f) || !Path.HasExtension(f) || File.Exists(f)).Where(f => !Core.Presets.ProjectStore.IsProjectFile(f)).ToList();
         if (videos.Count > 0) await AddFilesAsync(videos, replace);
+    }
+
+    private void SetTitle(string? project)
+    {
+        Title = project is null ? $"StampCut {AppVersion}" : $"{project} — StampCut {AppVersion}";
+        _titleText.Text = project is null ? "StampCut" : project;
     }
 
     /// <summary>Пока нет ни одного ролика, инструменты и управление воспроизведением неактивны.</summary>

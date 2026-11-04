@@ -105,7 +105,7 @@ public sealed partial class MainWindow
             _clips.Clear();
             _current = null; _activeSegment = null;
             _projectPath = null;
-            Title = "StampCut " + AppVersion;
+            SetTitle(null);
         }
         Clip? first = null;
         foreach (var file in list)
