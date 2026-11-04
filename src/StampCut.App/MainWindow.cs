@@ -185,7 +185,7 @@ public sealed partial class MainWindow : Window
         _timer.Tick += (_, _) => OnTick();
         _preview.Player.MediaOpened += (_, _) => OnMediaOpened();
         _preview.Player.MediaFailed += (_, e) => OnMediaFailed(e.ErrorException);
-        _preview.Player.MediaEnded += (_, _) => OnTick();
+        _preview.Player.MediaEnded += (_, _) => { if (_followEdit) OnTick(); else Pause(); };
         _preview.OverlayChanged += _ => SyncOverlayNumbers();
         _preview.OverlaySelected += o => { _selectedOverlay = o; SyncOverlayPanel(); };
         _preview.CropChanged += () => { SyncCropPanel(); UpdateOutputGeometry(rebuild: false); };

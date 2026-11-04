@@ -31,6 +31,7 @@ public sealed class TimelineControl : FrameworkElement
 
     private enum Drag { None, Seek, Edge }
     private Drag _drag;
+    public bool IsDragging => _drag != Drag.None;
     private Segment? _dragSegment;
     private bool _dragIsIn;
     private const double Pad = 10;

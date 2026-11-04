@@ -96,7 +96,8 @@ public sealed partial class MainWindow
     {
         _filterTimer.Stop();
         if (_current is null || _playing || !_mediaReady) return;
-        if (_current.Filters.IsDefault) { _preview.HidePoster(); return; }
+        _preview.HidePoster(); // старый кадр с фильтрами не должен перекрывать новую позицию
+        if (_current.Filters.IsDefault) return;
         _filterTimer.Tick -= OnFilterTimer; _filterTimer.Tick += OnFilterTimer;
         _filterTimer.Start();
     }
@@ -182,43 +183,72 @@ public sealed partial class MainWindow
             var path = await _proxy.PosterAsync(clip.Media, atSec, ct);
             if (path is null || ct.IsCancellationRequested || _mediaReady) return;
             var bmp = new BitmapImage();
-            bmp.BeginInit(); bmp.CacheOption = BitmapCacheOption.OnLoad; bmp.UriSource = Ui.FileUri(path); bmp.EndInit(); bmp.Freeze();
+            bmp.BeginInit(); bmp.CacheOption = BitmapCacheOption.OnLoad; bmp.CreateOptions = BitmapCreateOptions.IgnoreImageCache; bmp.UriSource = Ui.FileUri(path); bmp.EndInit(); bmp.Freeze();
             if (!_mediaReady && ReferenceEquals(clip, _current)) _preview.ShowPoster(bmp);
         }
         catch (Exception ex) { Logger.Warn("Постер: " + ex.Message); }
     }
+
+    private double _jumpTarget = -1;
+    private DateTime _jumpAt;
 
     private void OnTick()
     {
         if (!_mediaReady || _current is null) return;
         double pos = _preview.Player.Position.TotalSeconds;
         _lastPosition = pos;
-        if (_playing && _followEdit)
-        {
-            var segs = _current.OrderedSegments();
-            var inside = segs.FirstOrDefault(s => s.Contains(pos));
-            if (inside is null || pos >= inside.OutSec - 0.02)
-            {
-                // конец фрагмента или «дырка»: следующий фрагмент этого ролика, иначе следующий ролик, иначе стоп
-                var next = segs.FirstOrDefault(s => s.InSec > pos + 0.02 && !ReferenceEquals(s, inside));
-                if (inside is not null && pos < inside.OutSec - 0.02) next = null;
-                if (next is not null) { _activeSegment = next; Seek(next.InSec); UpdateTimeUi(next.InSec); return; }
-                int idx = _clips.IndexOf(_current);
-                if (inside is not null || segs.Count == 0 || pos > segs[^1].OutSec - 0.02)
-                {
-                    if (idx >= 0 && idx + 1 < _clips.Count)
-                    {
-                        var nc = _clips[idx + 1];
-                        SelectClip(nc, startAt: nc.OrderedSegments().FirstOrDefault()?.InSec ?? 0, autoplay: true);
-                        return;
-                    }
-                    Pause();
-                    if (inside is not null) Seek(inside.OutSec);
-                    return;
-                }
-            }
-        }
+        if (_playing && !_followEdit && pos >= _current.Media.DurationSec - 0.02) { Pause(); UpdateTimeUi(pos); return; }
+        if (_playing && _followEdit && !_timeline.IsDragging && !FollowEditTick(pos)) return;
         UpdateTimeUi(pos);
+    }
+
+    /// <summary>Режим «По склейке». Возвращает false, если позиция изменилась или ролик сменился (интерфейс обновлять не нужно).</summary>
+    private bool FollowEditTick(double pos)
+    {
+        if (_current is null) return true;
+        // только что прыгнули — даём плееру доехать до цели, иначе будем дёргать его каждые 33 мс
+        if (_jumpTarget >= 0 && pos < _jumpTarget + 0.5 && (DateTime.UtcNow - _jumpAt).TotalMilliseconds < 400) return true;
+        _jumpTarget = -1;
+        var segs = _current.OrderedSegments();
+        var inside = segs.FirstOrDefault(s => s.Contains(pos) || Math.Abs(pos - s.InSec) < 0.1);
+        if (inside is not null)
+        {
+            if (!ReferenceEquals(inside, _activeSegment)) _activeSegment = inside;
+            if (pos < inside.OutSec - 0.02) return true;
+            int i = segs.IndexOf(inside);
+            var next = i + 1 < segs.Count ? segs[i + 1] : null;
+            if (next is not null)
+            {
+                _activeSegment = next;
+                if (next.InSec > pos + 0.02) { JumpTo(next.InSec); return false; }
+                return true; // смежный фрагмент: просто едем дальше
+            }
+            return NextClipOrPause(inside.OutSec);
+        }
+        var after = segs.FirstOrDefault(s => s.InSec > pos);
+        if (after is not null) { _activeSegment = after; JumpTo(after.InSec); return false; }
+        return NextClipOrPause(null);
+    }
+
+    private void JumpTo(double t)
+    {
+        _jumpTarget = t; _jumpAt = DateTime.UtcNow;
+        Seek(t);
+    }
+
+    private bool NextClipOrPause(double? stopAt)
+    {
+        if (_current is null) return true;
+        int idx = _clips.IndexOf(_current);
+        if (idx >= 0 && idx + 1 < _clips.Count)
+        {
+            var nc = _clips[idx + 1];
+            SelectClip(nc, startAt: nc.OrderedSegments().FirstOrDefault()?.InSec ?? 0, autoplay: true);
+            return false;
+        }
+        Pause();
+        if (stopAt is { } t) Seek(t);
+        return false;
     }
 
     private void UpdateTimeUi(double pos)
@@ -236,6 +266,7 @@ public sealed partial class MainWindow
     private void Seek(double t)
     {
         if (_current is null) return;
+        if (_jumpTarget >= 0 && Math.Abs(t - _jumpTarget) > 0.001) _jumpTarget = -1;
         t = Math.Clamp(t, 0, _current.Media.DurationSec);
         _lastPosition = t;
         if (_mediaReady) _preview.Player.Position = TimeSpan.FromSeconds(t);

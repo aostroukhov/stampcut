@@ -132,7 +132,18 @@ public sealed partial class MainWindow
         RefreshClipList();
         UpdateExportInfo();
         if (first is not null) SelectClip(first);
-        else if (_clips.Count == 0) _statusInfo.Text = T("Перетащите видео в окно или нажмите «Открыть»");
+        else if (_clips.Count == 0) ClearPreview();
+    }
+
+    private void ClearPreview()
+    {
+        _timer.Stop();
+        _mediaReady = false;
+        _preview.CurrentClip = null; _preview.Player.Source = null; _preview.ShowPoster(null); _preview.ShowMessage(null); _preview.Refresh();
+        _timeline.Duration = 0; _timeline.Segments = new List<Segment>(); _timeline.ActiveSegment = null; _timeline.InvalidateVisual();
+        _statusInfo.Text = T("Перетащите видео в окно или нажмите «Открыть»");
+        _fragmentText.Text = "";
+        _timeText.Text = "00:00.000 / 00:00.000";
     }
 
     private void SelectClip(Clip clip, double? startAt = null, bool autoplay = true)
@@ -184,13 +195,7 @@ public sealed partial class MainWindow
         _current = null;
         RefreshClipList();
         if (_clips.Count > 0) SelectClip(_clips[Math.Clamp(i, 0, _clips.Count - 1)]);
-        else
-        {
-            _preview.CurrentClip = null; _preview.Player.Source = null; _preview.ShowPoster(null); _preview.Refresh();
-            _timeline.Duration = 0; _timeline.Segments = new List<Segment>(); _timeline.InvalidateVisual();
-            _statusInfo.Text = T("Перетащите видео в окно или нажмите «Открыть»");
-            _fragmentText.Text = "";
-        }
+        else ClearPreview();
         UpdateExportInfo();
     }
 

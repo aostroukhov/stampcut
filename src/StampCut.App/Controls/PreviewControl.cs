@@ -203,8 +203,11 @@ public sealed class PreviewControl : Grid
                 w = Math.Clamp(w, 8, OutputWidth);
                 double h = w * aspect;
                 if (h > OutputHeight) { h = OutputHeight; w = h / aspect; }
-                x = Math.Clamp(x, 0, OutputWidth - w);
-                y = Math.Clamp(y, 0, OutputHeight - h);
+                x = Math.Max(0, Math.Min(OutputWidth - w, x));
+                y = Math.Max(0, Math.Min(OutputHeight - h, y));
+                // якорь — ближайший угол: центральные якоря игнорируют смещение и «запирают» оверлей по оси
+                int col = x + w / 2 < OutputWidth / 2.0 ? 0 : 2, row = y + h / 2 < OutputHeight / 2.0 ? 0 : 2;
+                s.Anchor = (Anchor)(row * 3 + col);
                 OverlayGeometry.ApplyPosition(OutputWidth, OutputHeight, s, item.PngWidth, item.PngHeight, x, y, w);
                 OverlayChanged?.Invoke(s); Layout();
             }
@@ -238,7 +241,6 @@ public sealed class PreviewControl : Grid
                 var r = RectOut(); double k = K();
                 Apply(r.X + e.HorizontalChange / _scale / k, r.Y + e.VerticalChange / _scale / k, r.Width);
             };
-            move.DragCompleted += (_, _) => SnapAnchor();
             foreach (var (t, dx, dy) in handles)
             {
                 int ddx = dx, ddy = dy;
@@ -257,19 +259,6 @@ public sealed class PreviewControl : Grid
                     double y = ddy < 0 ? r.Bottom - h : ddy == 0 ? r.Y + (r.Height - h) / 2 : r.Y;
                     Apply(x, y, w);
                 };
-                t.DragCompleted += (_, _) => SnapAnchor();
-            }
-            void SnapAnchor()
-            {
-                // якорь выбирается по положению: пресет остаётся осмысленным на роликах другого размера
-                var r = RectOut();
-                var nearest = OverlayGeometry.NearestAnchor(OutputWidth, OutputHeight, r.X + r.Width / 2, r.Y + r.Height / 2);
-                if (nearest != s.Anchor)
-                {
-                    s.Anchor = nearest;
-                    OverlayGeometry.ApplyPosition(OutputWidth, OutputHeight, s, item.PngWidth, item.PngHeight, r.X, r.Y, r.Width);
-                    OverlayChanged?.Invoke(s); Layout();
-                }
             }
         }
     }
@@ -322,14 +311,14 @@ public sealed class PreviewControl : Grid
             move.DragStarted += (_, _) => { SelectedRedaction = region; RedactionSelected?.Invoke(region); Layout(); };
             move.DragDelta += (_, e) =>
             {
-                region.X = Math.Clamp(region.X + e.HorizontalChange / _scale / VideoWidth, 0, 1 - region.W);
-                region.Y = Math.Clamp(region.Y + e.VerticalChange / _scale / VideoHeight, 0, 1 - region.H);
+                region.X = Math.Max(0, Math.Min(1 - region.W, region.X + e.HorizontalChange / _scale / VideoWidth));
+                region.Y = Math.Max(0, Math.Min(1 - region.H, region.Y + e.VerticalChange / _scale / VideoHeight));
                 RedactionChanged?.Invoke(region); Layout();
             };
             resize.DragDelta += (_, e) =>
             {
-                region.W = Math.Clamp(region.W + e.HorizontalChange / _scale / VideoWidth, 8.0 / VideoWidth, 1 - region.X);
-                region.H = Math.Clamp(region.H + e.VerticalChange / _scale / VideoHeight, 8.0 / VideoHeight, 1 - region.Y);
+                region.W = Math.Max(8.0 / VideoWidth, Math.Min(1 - region.X, region.W + e.HorizontalChange / _scale / VideoWidth));
+                region.H = Math.Max(8.0 / VideoHeight, Math.Min(1 - region.Y, region.H + e.VerticalChange / _scale / VideoHeight));
                 RedactionChanged?.Invoke(region); Layout();
             };
         }

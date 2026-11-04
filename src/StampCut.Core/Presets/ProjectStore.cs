@@ -99,11 +99,14 @@ public static class ProjectStore
                 clip.Segments.Clear();
                 foreach (var s in e.Segments) clip.Segments.Add(new Segment { InSec = Math.Clamp(s.In, 0, media.DurationSec), OutSec = Math.Clamp(s.Out, 0, media.DurationSec) });
             }
-            if (e.Crop is { } cr) clip.Crop = new CropRect { X = cr.X, Y = cr.Y, W = cr.W, H = cr.H };
+            if (e.Crop is { } cr) clip.Crop = new CropRect { X = Math.Clamp(cr.X, 0, 1), Y = Math.Clamp(cr.Y, 0, 1), W = Math.Clamp(cr.W, 0.01, 1), H = Math.Clamp(cr.H, 0.01, 1) };
             clip.AudioGainDb = e.AudioGainDb;
             if (e.Filters is { } f) clip.Filters = new VideoFilters { Shadows = f.Shadows, Highlights = f.Highlights, Saturation = f.Saturation, Brightness = f.Brightness, Contrast = f.Contrast };
             foreach (var r in e.Redactions)
-                clip.Redactions.Add(new RedactRegion { X = r.X, Y = r.Y, W = r.W, H = r.H, Mode = r.Mode == "pixelate" ? RedactMode.Pixelate : RedactMode.Blur, BlockSize = r.BlockSize, BlurRadius = r.BlurRadius, FromSec = r.From, ToSec = r.To });
+            {
+                double w = Math.Clamp(r.W, 0.01, 1), h = Math.Clamp(r.H, 0.01, 1);
+                clip.Redactions.Add(new RedactRegion { X = Math.Clamp(r.X, 0, 1 - w), Y = Math.Clamp(r.Y, 0, 1 - h), W = w, H = h, Mode = r.Mode == "pixelate" ? RedactMode.Pixelate : RedactMode.Blur, BlockSize = Math.Max(0, r.BlockSize), BlurRadius = Math.Max(0, r.BlurRadius), FromSec = r.From, ToSec = r.To });
+            }
             foreach (var x in e.Censors)
                 clip.Censors.Add(new AudioCensor { FromSec = x.From, ToSec = x.To, Mode = x.Mode == "mute" ? CensorMode.Mute : CensorMode.Beep });
             result.Clips.Add(clip);
