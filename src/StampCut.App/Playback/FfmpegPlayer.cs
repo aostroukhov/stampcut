@@ -104,11 +104,16 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer
     private SwrContext* _swr;
     private int _vIdx = -1, _aIdx = -1;
     private double _vTb, _aTb, _startOffset, _duration, _fps = 30;
+    // делегаты держим в статических полях, чтобы сборщик мусора не освободил переходник, пока ffmpeg им пользуется
     private static readonly AVCodecContext_get_format GetFormatDelegate = GetFormat;
+    private static readonly AVIOInterruptCB_callback InterruptDelegate = Interrupt;
+    private GCHandle _self;
 
     // часы
     private readonly Stopwatch _wall = new();
     private double _wallBase;
+    private double _audioClockLast = -1;
+    private readonly Stopwatch _audioStall = new();
     private double _lastPresentedPts;
     private double _seekTarget = -1;
     private bool _seekingVideo, _seekingAudio;
@@ -142,7 +147,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer
 
     public TimeSpan Position
     {
-        get => TimeSpan.FromSeconds(Math.Clamp(_playing ? Clock() : _lastPresentedPts, 0, Math.Max(0, _duration)));
+        get => TimeSpan.FromSeconds(ClampTime(_playing ? Clock() : _lastPresentedPts));
         set => Seek(value.TotalSeconds);
     }
 
@@ -197,8 +202,12 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer
 
     private void OpenCore(string path)
     {
-        AVFormatContext* fmt = null;
-        Check(ffmpeg.avformat_open_input(&fmt, path, null, null), "avformat_open_input");
+        if (!_self.IsAllocated) _self = GCHandle.Alloc(this, GCHandleType.Normal);
+        AVFormatContext* fmt = ffmpeg.avformat_alloc_context();
+        fmt->interrupt_callback.callback = InterruptDelegate;
+        fmt->interrupt_callback.opaque = (void*)GCHandle.ToIntPtr(_self);
+        int openResult = ffmpeg.avformat_open_input(&fmt, path, null, null);
+        if (openResult < 0) throw new InvalidOperationException("avformat_open_input: " + ErrorText(openResult)); // контекст ffmpeg уже освободил
         _fmt = fmt;
         Check(ffmpeg.avformat_find_stream_info(_fmt, null), "avformat_find_stream_info");
         _vIdx = ffmpeg.av_find_best_stream(_fmt, AVMediaType.AVMEDIA_TYPE_VIDEO, -1, -1, null, 0);
@@ -252,6 +261,15 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer
         }
         Check(ffmpeg.avcodec_open2(_vctx, codec, null), "avcodec_open2 (video)");
     }
+
+    /// <summary>Прерывание чтения (сетевой диск, медленный носитель): при закрытии av_read_frame возвращается сразу.</summary>
+    private static int Interrupt(void* opaque)
+    {
+        try { return GCHandle.FromIntPtr((IntPtr)opaque).Target is FfmpegPlayer p && p._stop ? 1 : 0; }
+        catch { return 1; }
+    }
+
+    private double ClampTime(double t) => _duration > 0 ? Math.Clamp(t, 0, _duration) : Math.Max(0, t);
 
     /// <summary>Аппаратное декодирование: выбор поверхности D3D11, если декодер её предлагает, иначе первый программный формат.</summary>
     private static AVPixelFormat GetFormat(AVCodecContext* ctx, AVPixelFormat* fmts)
@@ -309,10 +327,20 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer
         {
             if (_decodeThread is null && _fmt is null) { IsOpen = false; return; }
             try { _queue.CompleteAdding(); } catch { }
-            try { _decodeThread?.Join(3000); } catch { }
-            try { _presentThread?.Join(3000); } catch { }
+            bool stopped = true;
+            try { stopped &= _decodeThread?.Join(5000) ?? true; } catch { }
+            try { stopped &= _presentThread?.Join(2000) ?? true; } catch { }
             _decodeThread = _presentThread = null;
-            FreeNative();
+            _playRequested = false;
+            if (stopped) FreeNative();
+            else
+            {
+                // поток не остановился (завис в чтении): контексты не трогаем, лучше утечка, чем падение
+                Logger.Warn("FFmpeg-плеер: поток декодирования не остановился, ресурсы не освобождены");
+                _fmt = null; _vctx = null; _actx = null; _sws = null; _swr = null; _hwDevice = null; _waveOut = null; _audioBuffer = null;
+                _queue = new BlockingCollection<VideoFrame>(QueueCapacity);
+                _bufferEpoch++; _allBuffers.Clear(); while (_pool.TryTake(out _)) { }
+            }
             IsOpen = false;
             _playing = false;
             _image.Source = null;
@@ -345,7 +373,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer
         _audioPushedSamples = 0; _audioBasePts = -1;
     }
 
-    public void Dispose() { Close(); _wake.Dispose(); }
+    public void Dispose() { Close(); if (_self.IsAllocated) _self.Free(); }
 
     // ------------------------------------------------------------------ управление
 
@@ -353,6 +381,8 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer
     {
         if (!IsOpen) { _playRequested = true; return; }
         if (_playing) return;
+        // после шагов по кадрам звук остался на месте паузы: перемотать его к показанному кадру
+        if (_audioBasePts >= 0 && Math.Abs(Clock() - _lastPresentedPts) > 0.05) Seek(_lastPresentedPts);
         _wallBase = _lastPresentedPts;
         _wall.Restart();
         _playing = true;
@@ -380,7 +410,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer
     private void Seek(double t)
     {
         if (!IsOpen && _fmt is null) { _lastPresentedPts = t; return; }
-        t = Math.Clamp(t, 0, Math.Max(0, _duration));
+        t = ClampTime(t);
         _lastPresentedPts = t;
         _wallBase = t; _wall.Restart();
         Interlocked.Increment(ref _gen);
@@ -393,8 +423,17 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer
     {
         if (_audioBuffer is not null && _audioBasePts >= 0 && _audioPushedSamples > 0)
         {
-            double played = (_audioPushedSamples - _audioBuffer.BufferedBytes / (AudioChannels * 2)) / (double)AudioRate - AudioLatencySec;
-            return _audioBasePts + Math.Max(0, played);
+            int buffered = _audioBuffer.BufferedBytes;
+            double played = (_audioPushedSamples - buffered / (AudioChannels * 2)) / (double)AudioRate - AudioLatencySec;
+            double t = _audioBasePts + Math.Max(0, played);
+            // звук кончился (конец дорожки или пауза в ней): часы идут дальше сами, иначе видео замрёт у последних кадров
+            if (buffered == 0 && _playing)
+            {
+                if (!_audioStall.IsRunning) { _audioClockLast = t; _audioStall.Restart(); }
+                return _audioClockLast + _audioStall.Elapsed.TotalSeconds;
+            }
+            if (_audioStall.IsRunning) _audioStall.Reset();
+            return t;
         }
         return _wallBase + (_playing ? _wall.Elapsed.TotalSeconds : 0);
     }
@@ -431,7 +470,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer
         if (_audioBuffer is not null)
         {
             try { _audioBuffer.ClearBuffer(); } catch { }
-            _audioPushedSamples = 0; _audioBasePts = -1;
+            _audioPushedSamples = 0; _audioBasePts = -1; _audioStall.Reset();
         }
     }
 
@@ -440,6 +479,8 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer
         var pkt = ffmpeg.av_packet_alloc();
         var frame = ffmpeg.av_frame_alloc();
         var sw = ffmpeg.av_frame_alloc();
+        int serial = _openSerial;
+        int videoErrors = 0;
         try
         {
             while (!_stop)
@@ -456,8 +497,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer
                         ffmpeg.avcodec_send_packet(_vctx, null);
                         DrainVideo(frame, sw);
                         if (_actx is not null) { ffmpeg.avcodec_send_packet(_actx, null); DrainAudio(frame); }
-                        EnqueueFrame(new VideoFrame { Eof = true, Gen = _gen });
-                        _eofQueued = true;
+                        if (EnqueueFrame(new VideoFrame { Eof = true, Gen = _gen })) _eofQueued = true;
                         continue;
                     }
                     Thread.Sleep(10);
@@ -467,7 +507,9 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer
                 {
                     if (pkt->stream_index == _vIdx)
                     {
-                        if (ffmpeg.avcodec_send_packet(_vctx, pkt) >= 0) DrainVideo(frame, sw);
+                        int sr = ffmpeg.avcodec_send_packet(_vctx, pkt);
+                        if (sr >= 0) { videoErrors = 0; DrainVideo(frame, sw); }
+                        else if (++videoErrors >= 30) throw new InvalidOperationException("видео не декодируется: " + ErrorText(sr));
                     }
                     else if (pkt->stream_index == _aIdx && _actx is not null)
                     {
@@ -480,7 +522,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer
         catch (Exception ex)
         {
             Logger.Error("FFmpeg-плеер: декодирование", ex);
-            _dispatcher.BeginInvoke(() => Failed?.Invoke(ex));
+            _dispatcher.BeginInvoke(() => { if (serial == _openSerial) Failed?.Invoke(ex); });
         }
         finally
         {
@@ -496,6 +538,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer
         {
             try
             {
+                int gen = _gen; // поколение до проверок: кадр, сконвертированный во время перемотки, не выдаст себя за новый
                 long ts = frame->best_effort_timestamp != ffmpeg.AV_NOPTS_VALUE ? frame->best_effort_timestamp : frame->pts;
                 double pts = ts == ffmpeg.AV_NOPTS_VALUE ? _lastPresentedPts : ts * _vTb - _startOffset;
                 if (_seekingVideo)
@@ -515,7 +558,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer
                 var buf = TakeBuffer();
                 if (buf == IntPtr.Zero) continue; // буферов нет — кадр пропускаем
                 Convert(src, buf);
-                if (!EnqueueFrame(new VideoFrame { Buffer = buf, Pts = pts, Gen = _gen })) _pool.Add(buf);
+                if (!EnqueueFrame(new VideoFrame { Buffer = buf, Pts = pts, Gen = gen })) _pool.Add(buf);
             }
             finally { ffmpeg.av_frame_unref(frame); }
         }
@@ -574,7 +617,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer
                 // не переполнять буфер: ждём, пока плеер проиграет (на паузе — просто ждём команду)
                 while (!_stop && _cmds.IsEmpty && _audioBuffer.BufferedBytes + bytes > _audioBuffer.BufferLength - bytes) Thread.Sleep(8);
                 if (_stop || !_cmds.IsEmpty) return;
-                if (_audioBasePts < 0 && pts >= 0) _audioBasePts = Math.Max(pts, _seekTarget >= 0 ? Math.Min(pts, _seekTarget) : pts);
+                if (_audioBasePts < 0 && pts >= 0) _audioBasePts = pts;
                 _audioBuffer.AddSamples(_audioScratch, 0, bytes);
                 _audioPushedSamples += got;
             }
@@ -588,7 +631,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer
         {
             try { if (_queue.TryAdd(f, 40)) return true; }
             catch (InvalidOperationException) { return false; }
-            if (!_cmds.IsEmpty && !f.Eof) return false; // команда ждёт — кадр устарел
+            if (!_cmds.IsEmpty) return false; // команда ждёт — кадр устарел
         }
         return false;
     }

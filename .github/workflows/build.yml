@@ -38,9 +38,9 @@ jobs:
         run: |
           # стабильная ветка в приоритете: master-сборки требуют самых свежих драйверов NVIDIA для NVENC
           # shared-сборка: ffmpeg.exe и ffprobe.exe маленькие, библиотеки общие (и те же DLL использует встроенный плеер)
+          # встроенный плеер собран под FFmpeg 8.1 (FFmpeg.AutoGen 8.1 → avcodec-62.dll): другие ветки ему не подходят
           $urls = @(
-            "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-gpl-shared-8.1.zip",
-            "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n9.0-latest-win64-gpl-shared-9.0.zip"
+            "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-gpl-shared-8.1.zip"
           )
           $ok = $false
           foreach ($u in $urls) {
@@ -53,6 +53,7 @@ jobs:
           Copy-Item (Join-Path $exe.DirectoryName "ffmpeg.exe") tools/ffmpeg/
           Copy-Item (Join-Path $exe.DirectoryName "ffprobe.exe") tools/ffmpeg/
           Copy-Item (Join-Path $exe.DirectoryName "*.dll") tools/ffmpeg/
+          if (-not (Test-Path tools/ffmpeg/avcodec-62.dll)) { throw "Нет avcodec-62.dll: встроенный плеер (FFmpeg.AutoGen 8.1) не заработает" }
           $lic = Get-ChildItem ffmpeg-tmp -Recurse -Filter LICENSE.txt | Select-Object -First 1
           if ($lic) { Copy-Item $lic.FullName tools/ffmpeg/LICENSE-ffmpeg.txt }
           & tools/ffmpeg/ffmpeg.exe -hide_banner -version | Select-Object -First 1
