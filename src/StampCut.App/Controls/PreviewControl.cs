@@ -28,10 +28,9 @@ public sealed class OverlayItem
 /// </summary>
 public sealed class PreviewControl : Grid
 {
-    public MediaElement Player { get; } = new()
-    {
-        LoadedBehavior = MediaState.Manual, UnloadedBehavior = MediaState.Manual, ScrubbingEnabled = true, Stretch = Stretch.Uniform,
-    };
+    /// <summary>Движок просмотра (MediaElement или встроенный плеер FFmpeg); его View лежит внутри превью.</summary>
+    public Playback.IVideoPlayer Player { get; }
+    private int _hdrMode;
     private readonly Image _poster = new() { Stretch = Stretch.Uniform, IsHitTestVisible = false };
     private readonly Grid _media = new();
     private ColorFilterEffect? _effect;
@@ -71,11 +70,12 @@ public sealed class PreviewControl : Grid
     private double _scale = 1;
     private readonly List<Action> _layouters = new();
 
-    public PreviewControl()
+    public PreviewControl(Playback.IVideoPlayer player)
     {
+        Player = player;
         Background = Ui.PreviewBg;
         ClipToBounds = true;
-        _media.Children.Add(Player);
+        _media.Children.Add(Player.View);
         _media.Children.Add(_poster);
         Children.Add(_media);
         if (ColorFilterEffect.Available) { try { _effect = new ColorFilterEffect(); _media.Effect = _effect; } catch { _effect = null; } }
@@ -84,7 +84,7 @@ public sealed class PreviewControl : Grid
         SizeChanged += (_, _) => Layout();
         MouseLeftButtonDown += (_, e) =>
         {
-            if (e.OriginalSource == this || e.OriginalSource == Player || e.OriginalSource == _poster)
+            if (e.OriginalSource == this || e.OriginalSource == Player.View || e.OriginalSource == _poster)
             {
                 if (Mode == EditMode.Redact) { SelectedRedaction = null; RedactionSelected?.Invoke(null); Refresh(); }
             }
@@ -97,9 +97,19 @@ public sealed class PreviewControl : Grid
     public void SetFilters(VideoFilters f)
     {
         if (_effect is null) return;
-        if (f.IsDefault) { if (_media.Effect is not null) _media.Effect = null; return; }
+        if (f.IsDefault && _hdrMode == 0) { if (_media.Effect is not null) _media.Effect = null; return; }
         _effect.Apply(f);
         if (_media.Effect is null) _media.Effect = _effect;
+    }
+
+    /// <summary>HDR-источник во встроенном плеере: шейдер переводит PQ (1) или HLG (2) в SDR; 0 — обычное видео.</summary>
+    public void SetHdr(int mode)
+    {
+        _hdrMode = ColorFilterEffect.Available ? mode : 0;
+        if (_effect is null) return;
+        _effect.Hdr = _hdrMode;
+        if (_hdrMode != 0 && _media.Effect is null) _media.Effect = _effect;
+        if (_hdrMode == 0 && _media.Effect is not null && _effect.IsIdentity) _media.Effect = null;
     }
     public void SetMode(EditMode mode) { Mode = mode; Refresh(); }
     public void ShowPoster(BitmapSource? image) { _poster.Source = image; _poster.Visibility = image is null ? Visibility.Collapsed : Visibility.Visible; }

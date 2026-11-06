@@ -176,5 +176,7 @@ public static class Lang
         ["Открыть"] = "Open", ["Показать в папке"] = "Show in folder", ["Скопировать путь"] = "Copy path", ["Путь скопирован"] = "Path copied", ["Убрать из проекта"] = "Remove from project", ["Удалить файл и запись"] = "Delete file and record",
         ["МЕДИА"] = "MEDIA", ["Готовые файлы"] = "Exported files", ["+ Добавить"] = "+ Add", ["Открыть видео — новая сессия (Ctrl+O)"] = "Open video in a new session (Ctrl+O)",
         ["Добавить ролик или фото в конец склейки"] = "Add a clip or photo to the end of the sequence",
+        ["ПРОСМОТР"] = "PREVIEW", ["Движок:"] = "Engine:", ["FFmpeg (встроенный: любые файлы без прокси)"] = "FFmpeg (built-in: any file without a proxy)", ["Windows Media Foundation (старый)"] = "Windows Media Foundation (legacy)",
+        ["Движок просмотра изменится после перезапуска. Перезапустить сейчас?"] = "The preview engine changes after a restart. Restart now?",
     };
 }

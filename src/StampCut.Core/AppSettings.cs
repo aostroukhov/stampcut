@@ -16,6 +16,8 @@ public sealed class AppSettings
     public HardwareEncoder Encoder { get; set; } = HardwareEncoder.Auto;
     public bool HardwareDecode { get; set; } = true;
     public bool AlwaysUseProxy { get; set; }
+    /// <summary>Движок просмотра: "ffmpeg" (встроенный плеер, без прокси) или "windows" (MediaElement).</summary>
+    public string PreviewEngine { get; set; } = "ffmpeg";
     public int ProxyLongSide { get; set; } = 960;
     public string Language { get; set; } = "ru";
     /// <summary>Громкость просмотра 0..1.</summary>

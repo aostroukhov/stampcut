@@ -1,9 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <OutputType>Library</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>StampCut.Cli</RootNamespace>
-    <AssemblyName>stampcut-cli</AssemblyName>
+    <AssemblyName>StampCut.Cli</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../StampCut.Core/StampCut.Core.csproj" />

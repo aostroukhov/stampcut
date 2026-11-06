@@ -21,6 +21,30 @@ public sealed class ColorFilterEffect : ShaderEffect
         float saturation : register(c2);
         float brightness : register(c3);
         float contrast : register(c4);
+        float hdr : register(c5); // 0 — SDR, 1 — PQ (HDR10), 2 — HLG
+
+        // PQ (SMPTE 2084) → нит
+        float3 pqToNits(float3 e)
+        {
+            float m1 = 0.1593017578125, m2 = 78.84375, c1 = 0.8359375, c2 = 18.8515625, c3 = 18.6875;
+            float3 p = pow(max(e, 0.0), 1.0 / m2);
+            float3 l = pow(max(p - c1, 0.0) / (c2 - c3 * p), 1.0 / m1);
+            return l * 10000.0;
+        }
+        // HLG → нит (пик 1000)
+        float3 hlgToNits(float3 e)
+        {
+            float a = 0.17883277, b = 0.28466892, c = 0.55991073;
+            float3 lo = e * e / 3.0;
+            float3 hi = (exp((e - c) / a) + b) / 12.0;
+            float3 l = lerp(hi, lo, step(e, 0.5));
+            return l * 1000.0;
+        }
+        float3 hable(float3 x)
+        {
+            float A = 0.15, B = 0.50, C = 0.10, D = 0.20, E = 0.02, F = 0.30;
+            return ((x * (A * x + C * B) + D * E) / (x * (A * x + B) + D * F)) - E / F;
+        }
 
         // кривая Катмулла-Рома через точки (0,0) (0.25,y1) (0.5,0.5) (0.75,y2) (1,1) — как curves в ffmpeg
         float curve(float x)
@@ -43,6 +67,14 @@ public sealed class ColorFilterEffect : ShaderEffect
             float4 c = tex2D(input, uv);
             float a = max(c.a, 0.0001);
             float3 rgb = c.rgb / a;
+            if (hdr > 0.5)
+            {
+                // как в экспорте: линейный свет с белым 100 нит, тонмэппинг Хейбла, обратно в гамму
+                float3 nits = hdr < 1.5 ? pqToNits(rgb) : hlgToNits(rgb);
+                float3 lin = nits / 100.0;
+                float3 w = hable(float3(8.0, 8.0, 8.0));
+                rgb = pow(saturate(hable(lin) / w), 1.0 / 2.2);
+            }
             rgb = float3(curve(rgb.r), curve(rgb.g), curve(rgb.b));
             float lum = dot(rgb, float3(0.299, 0.587, 0.114));
             rgb = lerp(lum.xxx, rgb, saturation);
@@ -62,6 +94,7 @@ public sealed class ColorFilterEffect : ShaderEffect
     public static readonly DependencyProperty SaturationProperty = DependencyProperty.Register("Saturation", typeof(double), typeof(ColorFilterEffect), new UIPropertyMetadata(1.0, PixelShaderConstantCallback(2)));
     public static readonly DependencyProperty BrightnessProperty = DependencyProperty.Register("Brightness", typeof(double), typeof(ColorFilterEffect), new UIPropertyMetadata(0.0, PixelShaderConstantCallback(3)));
     public static readonly DependencyProperty ContrastProperty = DependencyProperty.Register("Contrast", typeof(double), typeof(ColorFilterEffect), new UIPropertyMetadata(1.0, PixelShaderConstantCallback(4)));
+    public static readonly DependencyProperty HdrProperty = DependencyProperty.Register("Hdr", typeof(double), typeof(ColorFilterEffect), new UIPropertyMetadata(0.0, PixelShaderConstantCallback(5)));
 
     public Brush Input { get => (Brush)GetValue(InputProperty); set => SetValue(InputProperty, value); }
     public double Shadows { get => (double)GetValue(ShadowsProperty); set => SetValue(ShadowsProperty, value); }
@@ -69,13 +102,16 @@ public sealed class ColorFilterEffect : ShaderEffect
     public double Saturation { get => (double)GetValue(SaturationProperty); set => SetValue(SaturationProperty, value); }
     public double Brightness { get => (double)GetValue(BrightnessProperty); set => SetValue(BrightnessProperty, value); }
     public double Contrast { get => (double)GetValue(ContrastProperty); set => SetValue(ContrastProperty, value); }
+    public double Hdr { get => (double)GetValue(HdrProperty); set => SetValue(HdrProperty, value); }
+    /// <summary>Все параметры нейтральны (эффект можно снять без изменения картинки).</summary>
+    public bool IsIdentity => Shadows == 0 && Highlights == 0 && Math.Abs(Saturation - 1) < 1e-9 && Brightness == 0 && Math.Abs(Contrast - 1) < 1e-9 && Hdr == 0;
 
     public ColorFilterEffect()
     {
         PixelShader = Shader.Value ?? throw new InvalidOperationException("шейдер недоступен");
         UpdateShaderValue(InputProperty);
         UpdateShaderValue(ShadowsProperty); UpdateShaderValue(HighlightsProperty); UpdateShaderValue(SaturationProperty);
-        UpdateShaderValue(BrightnessProperty); UpdateShaderValue(ContrastProperty);
+        UpdateShaderValue(BrightnessProperty); UpdateShaderValue(ContrastProperty); UpdateShaderValue(HdrProperty);
     }
 
     /// <summary>Те же формулы, что в VideoFilters.ToFfmpeg: проценты → параметры шейдера.</summary>

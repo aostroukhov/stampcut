@@ -18,6 +18,12 @@ public static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        // консольный режим: StampCut.exe probe|detect|export … — без окна, вывод в консоль родителя
+        if (args.Length > 0 && StampCut.Cli.Program.IsCommand(args[0]))
+        {
+            ConsoleHost.Attach();
+            return StampCut.Cli.Program.Run(args).GetAwaiter().GetResult();
+        }
         var settings = StampCut.Core.AppSettings.Load();
         Lang.Set(settings.Language);
         var culture = CultureInfo.GetCultureInfo(Lang.Current == "en" ? "en-US" : "ru-RU");

@@ -50,6 +50,10 @@ public sealed class SettingsWindow : Window
         encCombo.SelectedIndex = Array.IndexOf(encoders, st.Encoder);
         var hwDecode = Ui.Check(T("Аппаратное декодирование (D3D11VA)"), st.HardwareDecode, _ => { });
         var alwaysProxy = Ui.Check(T("Всегда готовить прокси для просмотра (если видео не играет)"), st.AlwaysUseProxy, _ => { });
+        var engines = new[] { ("ffmpeg", T("FFmpeg (встроенный: любые файлы без прокси)")), ("windows", T("Windows Media Foundation (старый)")) };
+        var engineCombo = new ComboBox { Width = 330, Height = Ui.ControlHeight };
+        foreach (var (_, name) in engines) engineCombo.Items.Add(name);
+        engineCombo.SelectedIndex = Math.Max(0, Array.FindIndex(engines, e => e.Item1 == st.PreviewEngine));
         var hwInfo = Ui.Label(s.Hardware is null ? T("GPU ещё проверяется…") : $"{T("Найдено: ")}{(s.Hardware.Encoders.Count == 0 ? T("только CPU") : string.Join(", ", s.Hardware.Encoders.Select(HardwareDetector.DisplayName)))}; декодирование: {(s.Hardware.PreferredHwAccel == "" ? "CPU" : s.Hardware.PreferredHwAccel)}"
             + (string.IsNullOrEmpty(s.Hardware.NvidiaDriver) ? "" : $"\n{s.Hardware.GpuName}, {T("драйвер NVIDIA")} {s.Hardware.NvidiaDriver}")
             + (string.IsNullOrEmpty(s.CachedRecommendation) ? "" : "\n⚠ " + s.CachedRecommendation), muted: true, size: Ui.FontCaption);
@@ -69,6 +73,7 @@ public sealed class SettingsWindow : Window
             st.CheckUpdates = checkUpdates.IsChecked == true;
             st.HardwareDecode = hwDecode.IsChecked == true;
             st.AlwaysUseProxy = alwaysProxy.IsChecked == true;
+            st.PreviewEngine = engines[Math.Max(0, engineCombo.SelectedIndex)].Item1;
             st.LibraryDir = string.IsNullOrWhiteSpace(libDir.Text) ? null : libDir.Text.Trim();
             st.FfmpegDir = string.IsNullOrWhiteSpace(ffDir.Text) ? null : ffDir.Text.Trim();
             DialogResult = true; Close();
@@ -93,7 +98,10 @@ public sealed class SettingsWindow : Window
                     openAfter,
                     Gap(), Ui.Header("GPU"),
                     Ui.Row(Ui.Label(T("Кодирование:"), muted: true), encCombo, Ui.SmallButton(T("Проверить заново"), () => { RedetectRequested = true; hwInfo.Text = T("Проверка запустится после сохранения."); })),
-                    hwDecode, alwaysProxy, hwInfo,
+                    hwDecode, hwInfo,
+                    Gap(), Ui.Header(T("ПРОСМОТР")),
+                    Ui.Row(Ui.Label(T("Движок:"), muted: true), engineCombo),
+                    alwaysProxy,
                     Gap(), Ui.Header(T("ОБЩАЯ БИБЛИОТЕКА РЕДАКЦИИ")),
                     Ui.Label(T("Папка (можно сетевую или в облаке) с подпапками overlays и presets — у всех сотрудников одинаковые оверлеи и пресеты."), muted: true, size: Ui.FontCaption),
                     Ui.Row(libDir, Ui.SmallButton("…", () => PickFolder(libDir))),

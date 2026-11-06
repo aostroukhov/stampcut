@@ -52,7 +52,8 @@ public sealed partial class MainWindow
         double start = startAt ?? clip.InSec;
         _lastPosition = start;
         _autoplayOnOpen = autoplay;
-        _preview.Player.Source = null;
+        _preview.Player.Close();
+        _preview.SetHdr(0);
         _preview.ShowMessage(null);
 
         if (_isImageClip)
@@ -72,7 +73,7 @@ public sealed partial class MainWindow
 
         _ = ShowPosterAsync(clip, start, cts.Token);
         string path;
-        bool needProxy = clip.Media.NeedsProxy || _s.Settings.AlwaysUseProxy;
+        bool needProxy = _preview.Player.NeedsProxy(clip.Media) || _s.Settings.AlwaysUseProxy;
         if (!needProxy) path = clip.Media.Path;
         else
         {
@@ -105,8 +106,8 @@ public sealed partial class MainWindow
     {
         _mediaReady = false;
         _pendingSeek = startAt;
-        _preview.Player.Source = Ui.FileUri(path);
-        _preview.Player.Play(); // MediaElement открывает файл только после Play()
+        _preview.Player.Open(path, startAt);
+        _preview.Player.Play();
         _playing = true;
         _playButton.Content = "⏸";
     }
@@ -156,7 +157,8 @@ public sealed partial class MainWindow
         _mediaReady = true;
         ApplyGainToPlayer();
         _preview.HidePoster();
-        if (_pendingSeek > 0.01) _preview.Player.Position = TimeSpan.FromSeconds(_pendingSeek);
+        if (_preview.Player is Playback.FfmpegPlayer fp) _preview.SetHdr(fp.IsHdrPq ? 1 : fp.IsHdrHlg ? 2 : 0);
+        if (_pendingSeek > 0.01 && Math.Abs(_preview.Player.Position.TotalSeconds - _pendingSeek) > 0.05) _preview.Player.Position = TimeSpan.FromSeconds(_pendingSeek);
         _pendingSeek = -1;
         _timer.Start();
         _preview.Refresh();
@@ -167,7 +169,7 @@ public sealed partial class MainWindow
 
     private void OnMediaFailed(Exception? ex)
     {
-        Logger.Warn("MediaElement не открыл файл: " + ex?.Message);
+        Logger.Warn($"Плеер ({_preview.Player.Name}) не открыл файл: {ex?.Message}");
         _mediaReady = false;
         _timer.Stop();
         if (_current is null) return;
@@ -379,6 +381,7 @@ public sealed partial class MainWindow
     {
         if (_current is null) return;
         Pause();
+        if (!_isImageClip && _mediaReady && _preview.Player.StepFrame(direction)) { _lastPosition = Position; return; } // встроенный плеер: точный шаг по кадрам
         double fps = _current.Media.Fps > 0 ? _current.Media.Fps : 30;
         Seek(Position + direction / fps);
     }

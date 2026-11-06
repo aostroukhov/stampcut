@@ -7,8 +7,9 @@ using StampCut.Core.Presets;
 namespace StampCut.Cli;
 
 /// <summary>
-/// Консольный StampCut: те же возможности, что в приложении, для скриптов и проверки конвейера.
-///   stampcut probe FILE
+/// Консольный режим StampCut: те же возможности, что в окне, для скриптов и проверки конвейера. Живёт внутри StampCut.exe:
+/// при первом аргументе-команде приложение подключается к консоли родителя и выполняет команду без окна.
+///   StampCut probe FILE
 ///   stampcut detect
 ///   stampcut export [--preset ID] [--encoder auto|none|nvenc|qsv|amf] [--no-hwdecode] [--out PATH] [--dry-run]
 ///                   [--overlay PNG --anchor bottom-right --offset 3,3 --size 25 --opacity 0.8 --show FROM-TO --fade IN,OUT]
@@ -18,7 +19,10 @@ namespace StampCut.Cli;
 /// </summary>
 public static class Program
 {
-    public static async Task<int> Main(string[] args)
+    /// <summary>Первый аргумент — консольная команда? Путь к файлу командой не считается: его открывает окно.</summary>
+    public static bool IsCommand(string arg) => arg is "probe" or "detect" or "export" or "help" or "-h" or "--help" or "version" or "-v" or "--version";
+
+    public static async Task<int> Run(string[] args)
     {
         CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
         try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { }
@@ -50,10 +54,10 @@ public static class Program
         .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion.Split('+')[0] ?? "0.0.0";
 
     private static void Usage() => Console.WriteLine($"""
-        StampCut CLI {Version} — консольная версия; графическое приложение: StampCut.exe
-          stampcut-cli probe FILE                  — анализ файла (или просто: stampcut-cli FILE)
-          stampcut-cli detect                      — проверить GPU-кодеры и фильтры ffmpeg
-          stampcut-cli export [параметры] --clip FILE [параметры ролика] [--clip FILE ...]
+        StampCut {Version} — консольный режим (StampCut.exe КОМАНДА …; из скриптов удобнее stampcut-cli.cmd, он дожидается завершения)
+          StampCut probe FILE                      — анализ файла
+          StampCut detect                          — проверить GPU-кодеры и фильтры ffmpeg
+          StampCut export [параметры] --clip FILE [параметры ролика] [--clip FILE ...]
             общие:   --preset ID  --encoder auto|none|nvenc|qsv|amf  --no-hwdecode  --out PATH  --dry-run  --list-presets
                      --normalize (выровнять громкость)  --transition SEC[:fade|dissolve|wipeleft|…] (переходы между фрагментами)
             оверлей: --overlay PNG  --anchor top-left|top-center|...|bottom-right  --offset X,Y(%)  --size W(%)  --opacity 0..1

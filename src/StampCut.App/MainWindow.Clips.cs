@@ -248,7 +248,7 @@ public sealed partial class MainWindow
         UpdateEnabledState();
         _timer.Stop();
         _mediaReady = false; _isImageClip = false;
-        _preview.CurrentClip = null; _preview.Player.Source = null; _preview.ShowPoster(null); _preview.ShowMessage(null); _preview.Refresh();
+        _preview.CurrentClip = null; _preview.Player.Close(); _preview.SetHdr(0); _preview.ShowPoster(null); _preview.ShowMessage(null); _preview.Refresh();
         _timeline.SetDuration(0); _timeline.Segments = new List<Segment>(); _timeline.ActiveSegment = null; _timeline.Waveform = null; _timeline.Filmstrip = null; _timeline.InvalidateVisual();
         _statusInfo.Text = T("Перетащите видео в окно или нажмите «Открыть»");
         _fragmentText.Text = "";

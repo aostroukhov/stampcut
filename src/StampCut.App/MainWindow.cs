@@ -29,7 +29,7 @@ public sealed partial class MainWindow : Window
     private List<OverlaySettings> _overlayPresets = new();
     private string? _projectPath;
 
-    private readonly PreviewControl _preview = new();
+    private readonly PreviewControl _preview;
     private readonly TimelineControl _timeline = new();
     private readonly ListBox _clipList = new() { BorderThickness = new Thickness(0), Background = Brushes.Transparent };
     private readonly TextBlock _timeText = Ui.Label("00:00.000 / 00:00.000");
@@ -54,6 +54,7 @@ public sealed partial class MainWindow : Window
     public MainWindow(IReadOnlyList<string> filesToOpen, AppSettings settings)
     {
         _s = new AppServices(settings);
+        _preview = new PreviewControl(CreatePlayer());
         _proxy = new ProxyService(_s);
         _waveform = new WaveformService(_s);
         _filmstrip = new FilmstripService(_s);
@@ -116,6 +117,7 @@ public sealed partial class MainWindow : Window
             _proxyCts?.Cancel();
             _waveformCts?.Cancel();
             _beep.Dispose();
+            try { _preview.Player.Dispose(); } catch (Exception ex) { Logger.Warn("Плеер: " + ex.Message); }
             _s.Settings.WindowMaximized = WindowState == WindowState.Maximized;
             if (WindowState == WindowState.Normal) { _s.Settings.WindowWidth = Width; _s.Settings.WindowHeight = Height; }
             try { _s.Settings.Save(); } catch { }
@@ -248,9 +250,9 @@ public sealed partial class MainWindow : Window
     private void WireEvents()
     {
         _timer.Tick += (_, _) => OnTick();
-        _preview.Player.MediaOpened += (_, _) => OnMediaOpened();
-        _preview.Player.MediaFailed += (_, e) => OnMediaFailed(e.ErrorException);
-        _preview.Player.MediaEnded += (_, _) => { if (_followEdit) OnTick(); else Pause(); };
+        _preview.Player.Opened += OnMediaOpened;
+        _preview.Player.Failed += OnMediaFailed;
+        _preview.Player.Ended += () => { if (_followEdit) OnTick(); else Pause(); };
         _preview.OverlayChanged += s => { OnOverlayResized(s); SyncOverlayNumbers(); };
         _preview.OverlaySelected += o => { _selectedOverlay = o; SyncOverlayPanel(); };
         _preview.CropChanged += () => { SyncCropPanel(); UpdateOutputGeometry(rebuild: false); };
@@ -555,6 +557,19 @@ public sealed partial class MainWindow : Window
         SetTitle(null);
     }
 
+    /// <summary>Движок просмотра по настройке: встроенный плеер FFmpeg (если библиотеки на месте), иначе MediaElement.</summary>
+    private Playback.IVideoPlayer CreatePlayer()
+    {
+        if (_s.Settings.PreviewEngine != "windows")
+        {
+            var dir = Path.GetDirectoryName(_s.Ffmpeg.Ffmpeg);
+            Playback.FfmpegPlayer.HardwareDecode = _s.Settings.HardwareDecode;
+            if (Playback.FfmpegPlayer.Initialize(dir, out var err)) return new Playback.FfmpegPlayer(Dispatcher);
+            Logger.Warn("Встроенный плеер недоступен, используется MediaElement: " + err);
+        }
+        return new Playback.MediaElementPlayer();
+    }
+
     private void SetTitle(string? project, bool dirty = false)
     {
         var mark = dirty ? "• " : "";
@@ -725,6 +740,7 @@ public sealed partial class MainWindow : Window
     private void OpenSettings()
     {
         var oldLang = _s.Settings.Language;
+        var oldEngine = _s.Settings.PreviewEngine;
         var w = new SettingsWindow(_s) { Owner = this };
         if (w.ShowDialog() == true)
         {
@@ -736,8 +752,10 @@ public sealed partial class MainWindow : Window
             RefreshPresetCombos();
             _statusHw.Text = _s.HardwareSummary();
             if (w.RedetectRequested) { _s.StartHardwareDetection(force: true); _statusHw.Text = T("GPU: проверка…"); }
-            if (_s.Settings.Language != oldLang &&
-                MessageBox.Show(this, T("Язык изменится после перезапуска. Перезапустить сейчас?"), "StampCut", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+            string? restartWhy = _s.Settings.Language != oldLang ? T("Язык изменится после перезапуска. Перезапустить сейчас?")
+                : _s.Settings.PreviewEngine != oldEngine ? T("Движок просмотра изменится после перезапуска. Перезапустить сейчас?") : null;
+            if (restartWhy is not null &&
+                MessageBox.Show(this, restartWhy, "StampCut", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
             {
                 try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = true }); } catch (Exception ex) { Logger.Error("Перезапуск", ex); }
                 Close();

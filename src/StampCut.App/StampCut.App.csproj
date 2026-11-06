@@ -11,12 +11,16 @@
     <NoWarn>$(NoWarn);WPF0001</NoWarn>
     <SatelliteResourceLanguages>ru</SatelliteResourceLanguages>
     <InvariantGlobalization>false</InvariantGlobalization>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.WindowsDesktop.App.WPF" />
+    <PackageReference Include="FFmpeg.AutoGen" Version="8.1.0" />
+    <PackageReference Include="NAudio" Version="2.2.1" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../StampCut.Core/StampCut.Core.csproj" />
+    <ProjectReference Include="../StampCut.Cli/StampCut.Cli.csproj" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Assets/icon.ico" LogicalName="StampCut.icon.ico" />
